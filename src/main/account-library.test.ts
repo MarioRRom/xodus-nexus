@@ -11,6 +11,105 @@ const row=(productId=A, extra={})=>({productId,status:'Active',isTrial:false,sha
 const output=(entries=[row()],account='one@example.test',market='US')=>JSON.stringify({schema:1,account,market,checkedAt:new Date().toISOString(),entitlements:entries});
 const product=(productId:string):CatalogProduct=>({productId,title:productId,description:'',categories:[],installability:'supported',supportNote:''});
 
+it('shows explicit Positron access in All and Other without turning it into permanent ownership', async () => {
+  const reader = vi.fn(async () => output([row(A, { special: true, isPositron: true }), row(B)]));
+  const library = new AccountLibrary(async ids => ids.map(product), reader);
+  library.select('one@example.test', '/not-executed', 'US');
+  const all = await library.get('all');
+  expect(all.products.find(p => p.productId === A)).toMatchObject({ access: 'other' });
+  expect(all.excludedEntitlements).toBe(0);
+  expect((await library.get('other')).products.map(p => p.productId)).toEqual([A]);
+  expect((await library.get('owned')).products.map(p => p.productId)).toEqual([B]);
+  expect((await library.get('gamepass')).products).toEqual([]);
+  expect(library.peekAccess()).toEqual({ [A]: 'other', [B]: 'owned' });
+  expect(reader).toHaveBeenCalledTimes(1);
+});
+
+it('propagates conditional access through valid parents without bypassing chain restrictions', () => {
+  const conditional = { special: true, isPositron: true };
+  const kind = (rows: ReturnType<typeof row>[]) => entitlementKind(A, parseEntitlements(output(rows), 'one@example.test', 'US').entries);
+  expect(kind([row(A), row(B, conditional)])).toBe('owned');
+  expect(kind([row(A, { satisfiedByProductId: B }), row(B, conditional)])).toBe('other');
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B)])).toBe('other');
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: 'CFQ7TTC0KGQ8' })])).toBe('other');
+  for (const invalid of [{ status: 'Revoked' }, { isTrial: true }, { sharingSource: 'Family' }, { endDate: '2000-01-01T00:00:00Z' }]) {
+    expect(kind([row(A, { ...conditional, ...invalid })])).toBeUndefined();
+    expect(kind([row(A, { satisfiedByProductId: B }), row(B, { ...conditional, ...invalid })])).toBeUndefined();
+    expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B, invalid)])).toBeUndefined();
+  }
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B, { special: true })])).toBeUndefined();
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B, { satisfiedByProductId: A })])).toBeUndefined();
+});
+
+it('never upgrades legacy special rows or malformed and contradictory Positron provenance', () => {
+  for (const extra of [{ special: true }, { special: true, isPositron: false }]) {
+    const parsed = parseEntitlements(output([row(A, extra)]), 'one@example.test', 'US');
+    expect(entitlementKind(A, parsed.entries)).toBeUndefined();
+  }
+  for (const extra of [{ special: true, isPositron: 'true' }, { special: true, isPositron: null },
+    { special: true, isPositron: 1 }, { special: false, isPositron: true }]) {
+    const parsed = parseEntitlements(output([row(A, extra), row(B, { satisfiedByProductId: A }), row(C)]), 'one@example.test', 'US');
+    expect([...parsed.entries.keys()]).toEqual([C]);
+    expect(parsed.skipped).toBe(2);
+  }
+  const ordinary = parseEntitlements(output([row(A, { isPositron: false })]), 'one@example.test', 'US');
+  expect(entitlementKind(A, ordinary.entries)).toBe('owned');
+});
+
+it('bounds conditional chains and quarantines malformed conditional parents rather than recovering access', () => {
+  const conditional = { special: true, isPositron: true };
+  const deep = Array.from({ length: 17 }, (_, i) => row(String(i).padStart(12, '0'), {
+    ...(i === 0 ? conditional : {}), ...(i < 16 ? { satisfiedByProductId: String(i + 1).padStart(12, '0') } : {}),
+  }));
+  expect(entitlementKind(deep[0].productId, parseEntitlements(output(deep), 'one@example.test', 'US').entries)).toBeUndefined();
+  const bad = parseEntitlements(output([row(A, { ...conditional, satisfiedByProductId: B }), row(B, { endDate: undefined }), row(C)]), 'one@example.test', 'US');
+  expect([...bad.entries.keys()]).toEqual([C]);
+  expect(bad.skipped).toBe(2);
+});
+
+it('rechecks conditional access after expiry, revocation or account change and paginates it in All', async () => {
+  let status = 'Active';
+  const rows = Array.from({ length: 61 }, (_, i) => row(String(i).padStart(12, '0'), { special: true, isPositron: true }));
+  const reader = vi.fn(async () => output(rows.map(entry => ({ ...entry, status }))));
+  const library = new AccountLibrary(async ids => ids.map(product), reader);
+  library.select('one@example.test', '/not-executed', 'US');
+  const first = await library.get('all');
+  expect(first.products).toHaveLength(60);
+  expect((await library.get('all', first.cursor)).products).toHaveLength(1);
+  expect((await library.get('other')).products).toHaveLength(60);
+  expect((await library.get('owned')).products).toEqual([]);
+  status = 'Revoked';
+  expect((await library.get('all', undefined, true)).products).toEqual([]);
+  expect(library.peekAccess()).toEqual({});
+  status = 'Active';
+  await library.get('all', undefined, true);
+  vi.useFakeTimers();
+  try { vi.setSystemTime(Date.parse('2100-01-01T00:00:00Z')); expect(library.peekAccess()).toEqual({}); }
+  finally { vi.useRealTimers(); }
+  library.select('two@example.test', '/not-executed', 'US');
+  await expect(library.get('all')).rejects.toThrow('Invalid account library response');
+  expect(library.peekAccess()).toEqual({});
+});
+
+it('keeps conditional PC games visible through the real catalog path without inventing support or including DLC', async () => {
+  const record = (productId: string, type: string, format: string) => ({ ProductId: productId, ProductType: type,
+    LocalizedProperties: [{ ProductTitle: productId }], DisplaySkuAvailabilities: [{ Sku: { Properties: {
+      Packages: [{ PackageFormat: format, PlatformDependencies: [{ PlatformName: 'Windows.Desktop' }] }],
+    } } }] });
+  const service = new CatalogService((async () => new Response(JSON.stringify({ Products: [
+    record(A, 'Game', 'MSIXVC'), record(B, 'Game', 'EAppxBundle'), record(C, 'Durable', 'MSIXVC'),
+  ] }))) as typeof fetch);
+  const library = new AccountLibrary((ids, market) => service.licensedProducts(ids, market), async () => output([
+    row(A, { special: true, isPositron: true }), row(B, { special: true, isPositron: true }), row(C, { special: true, isPositron: true }),
+  ]));
+  library.select('one@example.test', '/not-executed', 'US');
+  const products = (await library.get('all')).products;
+  expect(products).toHaveLength(2);
+  expect(products.find(p => p.productId === A)).toMatchObject({ access: 'other', installability: 'supported' });
+  expect(products.find(p => p.productId === B)).toMatchObject({ access: 'other', installability: 'unsupported' });
+  expect((await library.get('owned')).products).toEqual([]);
+});
+
 it('provides account-bound fresh in-memory discovery hints without starting reads or reusing stale rights', async () => {
   const reader=vi.fn(async()=>output([row(),row(B,{satisfiedByProductId:'9ZZZZZZZZZZZ'}),row(C,{isTrial:true})]));
   const library=new AccountLibrary(async ids=>ids.map(product),reader);

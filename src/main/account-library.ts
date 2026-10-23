@@ -6,7 +6,7 @@ import type { AccountLibraryPage, CatalogProduct } from '../shared/types.js';
 
 interface Entitlement {
   productId: string; status: string; isTrial: boolean; sharingSource: string;
-  endDate: string; satisfiedByProductId?: string | null; special: boolean;
+  endDate: string; satisfiedByProductId?: string | null; special: boolean; isPositron?: boolean;
 }
 type Kind = AccountLibraryPage['kind'];
 type Reader = (binary: string, market: string, signal: AbortSignal) => Promise<string>;
@@ -31,6 +31,7 @@ export function parseEntitlements(output: string, account: string, market: strin
     const duplicate = seen.has(row.productId); seen.add(row.productId);
     if (duplicate || typeof row.status !== 'string' || row.status.length >= 40
       || typeof row.isTrial !== 'boolean' || typeof row.special !== 'boolean' || typeof row.sharingSource !== 'string'
+      || (row.isPositron !== undefined && (typeof row.isPositron !== 'boolean' || (row.isPositron && !row.special)))
       || row.sharingSource.length >= 40 || typeof row.endDate !== 'string' || row.endDate.length >= 50 || !Number.isFinite(Date.parse(row.endDate))
       || (row.satisfiedByProductId != null && !id(row.satisfiedByProductId))) { blocked.add(row.productId); entries.delete(row.productId); continue; }
     entries.set(row.productId, row);
@@ -50,22 +51,26 @@ export function parseEntitlements(output: string, account: string, market: strin
   return { checkedAt: result.checkedAt, entries, skipped };
 }
 
-type Resolution = { kind?: Exclude<Kind, 'all'>; reason?: 'access-unresolved' | 'access-special' | 'access-parent-unavailable' | 'access-cycle' | 'access-depth' };
+type Resolution = { kind?: Exclude<Kind, 'all'>; reason?: 'access-unresolved' | 'access-conditional' | 'access-special' | 'access-parent-unavailable' | 'access-cycle' | 'access-depth' };
 /** An active effective entitlement can have an absent source row. That is not permanent ownership. */
 function resolveEntitlement(productId: string, entries: Map<string, Entitlement>, now: number): Resolution {
   const visited = new Set<string>();
-  let current = productId, subscription = false;
+  let current = productId, subscription = false, conditional = false;
   for (let depth = 0; depth < 16; depth++) {
     if (visited.has(current)) return { reason: 'access-cycle' };
     visited.add(current);
     subscription ||= plans.has(current);
     const item = entries.get(current);
-    if (!item) return depth ? subscription ? { kind: 'gamepass' } : { kind: 'other', reason: 'access-unresolved' } : {};
-    if (item.special) return { reason: 'access-special' };
+    if (!item) return depth ? conditional ? { kind: 'other', reason: 'access-conditional' }
+      : subscription ? { kind: 'gamepass' } : { kind: 'other', reason: 'access-unresolved' } : {};
+    // Only the backend's explicit boolean provenance permits conditional access.
+    // Legacy/unknown special flags remain excluded, never assumed to be owned.
+    if (item.special && item.isPositron !== true) return { reason: 'access-special' };
     if (item.status !== 'Active' || item.isTrial || item.sharingSource !== 'None' || Date.parse(item.endDate) <= now)
       return depth ? { reason: 'access-parent-unavailable' } : {};
+    conditional ||= item.isPositron === true;
     if (!item.satisfiedByProductId) return current === productId && plans.has(current) ? {}
-      : { kind: subscription ? 'gamepass' : 'owned' };
+      : conditional ? { kind: 'other', reason: 'access-conditional' } : { kind: subscription ? 'gamepass' : 'owned' };
     current = item.satisfiedByProductId;
   }
   return { reason: 'access-depth' };

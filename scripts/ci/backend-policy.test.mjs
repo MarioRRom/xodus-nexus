@@ -355,3 +355,18 @@ test('Durable package selection is opt-in, parent-bound and preserves legacy aut
   assert.ok(main.includes('contentParentForChoice(choice, store.games)'));assert.ok(main.includes("if (updateGame && choice.kind === 'Durable')"));
   const build=await fs.readFile('scripts/build-backend.mjs','utf8');assert.ok(build.includes("['resolve-package', '--help']"));
 });
+
+test('conditional entitlement provenance is typed without changing account, download or launch code', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(patch => patch.file === 'xodus-conditional-entitlements.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]);
+  assert.deepEqual(files, ['crates/xodus-cli/src/commands/library.rs']);
+  for (const expected of ['and_then(Value::as_bool) == Some(true)', '"isPositron":positron',
+    'positron_provenance_is_explicit_boolean_and_never_copied_from_untrusted_fields',
+    'conflicting_positron_and_unknown_special_rows_quarantine_their_children', 'positron_normalized_protocol_fixture'])
+    assert.ok(patch.includes(expected), expected);
+  assert.doesNotMatch(patch, /^[+-].*(?:store_session|\.get_user|\.get_license|Authorization|\.send\(|\.save_|\.remove_)/m);
+});
