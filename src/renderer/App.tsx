@@ -469,7 +469,7 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
     setInstalling(product.productId);
     try {
       const folder = product.title.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 80) || product.productId;
-      if (!await startPackageInstall({ productId: product.installProductId ?? product.productId, title: product.title,
+      if (!await startPackageInstall({ productId: product.productId, title: product.title,
         destination: `${data.settings.installRoot.replace(/\/+$/, '')}/${folder}` })) return;
       toast({ kind: 'success', message: `${product.title} added to Install Queue.` });
     } catch (error) { toast({ kind: 'error', message: errorMessage(error) }); }
@@ -516,10 +516,10 @@ function AccountGamesForUser(props: AccountGamesProps) {
 
 export function ContentList({ plan, disabled, pending, install }: { plan: GameContentPlan; disabled: boolean; pending?: string; install: (id: string) => void }) {
   return <div className="content-list">{plan.items.length ? plan.items.map(item => <article key={item.productId}>
-    <div><strong title={item.title}>{item.title}</strong><small>{item.access === 'owned' ? 'Owned' : item.access === 'gamepass' ? 'Game Pass' : item.access === 'other' ? 'Other access' : 'License not verified'} · {item.status === 'installed' ? 'Installed' : item.status === 'available' ? 'Not installed' : item.status === 'unsupported' ? 'Unsupported package' : 'Unavailable'}</small>
+    <div><strong title={item.title}>{item.title}</strong><small>{item.access === 'owned' ? 'Owned' : item.access === 'gamepass' ? 'Game Pass' : item.access === 'other' ? 'Other access' : 'License not verified'} · {item.status === 'installed' ? 'Installed' : item.status === 'verify' ? 'License check required' : item.status === 'available' ? 'Not installed' : item.status === 'license-only' ? 'No download required' : item.status === 'bundle' ? 'Content bundle' : item.status === 'unsupported' ? 'Unsupported package' : 'Unavailable'}</small>
       {item.downloadBytes ? <small>Download: {(item.downloadBytes / 1024 ** 2).toFixed(1)} MiB</small> : null}<small>{item.note}</small></div>
-    <button className="secondary" disabled={disabled || Boolean(pending) || !item.access || !['available', 'installed'].includes(item.status)} onClick={() => install(item.productId)}><Download />{pending === item.productId ? 'Preparing…' : item.status === 'installed' ? 'Repair' : 'Install'}</button>
-  </article>) : <p>No related content packages are declared by this game.</p>}</div>;
+    {['license-only', 'bundle'].includes(item.status) ? null : <button className="secondary" disabled={disabled || Boolean(pending) || (!item.access && item.status !== 'verify') || !['available', 'installed', 'verify'].includes(item.status)} onClick={() => install(item.productId)}><Download />{pending === item.productId ? 'Preparing…' : item.status === 'verify' ? 'Verify and install' : item.status === 'installed' ? 'Repair' : 'Install'}</button>}
+  </article>) : <p>No related add-ons were found for this game.</p>}</div>;
 }
 
 function GameContentDialog({ game, data, close, toast }: { game: Game; data: AppSnapshot; close: () => void; toast: (value: Toast) => void }) {

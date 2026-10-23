@@ -464,7 +464,12 @@ async function startInstall(request: InstallRequest, updateGame?: Game): Promise
   finally { preparingInstall = false; }
 }
 
-function contentManager(): GameContent { return new GameContent(path.dirname(store.settings.runtimeRoot)); }
+let managedContent: { root: string; manager: GameContent } | undefined;
+function contentManager(): GameContent {
+  const root = path.dirname(store.settings.runtimeRoot);
+  if (!managedContent || managedContent.root !== root) managedContent = { root, manager: new GameContent(root) };
+  return managedContent.manager;
+}
 async function gameContent(id: string) {
   const game = store.games.find(entry => entry.id === id);
   if (!game) throw Error('Game not found.');
@@ -488,11 +493,11 @@ async function installGameContent(id: string, productId: string): Promise<string
     const game = store.games.find(entry => entry.id === id);
     const item = plan.items.find(item => item.productId === productId);
     const pkg = packages.find(pkg => pkg.productId === productId);
-    if (!game || !item?.access || !pkg || !['available', 'installed'].includes(item.status)) throw Error('No supported licensed content package was verified.');
+    if (!game || !item || (!item.access && item.status !== 'verify') || !pkg || !['available', 'installed', 'verify'].includes(item.status)) throw Error('No supported content package with a verified license or active source offer was found.');
     // Downloads use the existing genuine license-checked backend, not catalog URLs.
     requireBackend('streaming');
     if (await backend.externalDownloadRunning()) throw Error('Another Xodus download is running.');
-    const destination = await manager.prepare(game, pkg);
+    const destination = await manager.prepare(game, pkg, currentMarket());
     preparingInstall = true;
     return await prepareInstall({ productId, title: `${game.title}: ${item.title}`, destination }, undefined, { game, pkg, manager });
   } finally { preparingContent = false; preparingInstall = false; }
@@ -675,7 +680,7 @@ async function runDownload(task: DownloadTask, binary: string, market: string, u
           await store.patchGame(updateGame.id, { installState: inspected.installState, installMessage: inspected.installMessage, antiCheat: inspected.antiCheat, vcRedistEncrypted: inspected.vcRedistEncrypted, coverDataUrl: inspected.coverDataUrl, storeId: inspected.storeId ?? updateGame.storeId, installedVersion: inspected.installedVersion, packageName: inspected.packageName });
           delete gameUpdates[updateGame.id];
         }
-        else await store.upsertGame(inspected);
+        else await store.upsertGame({ ...inspected, offerProductId: /^[A-Z0-9]{12}$/.test(task.productId) ? task.productId : undefined });
       } catch { /* Some packages do not expose metadata yet. */ }
     }
     if (task.status === 'complete') await downloadCleanup.complete(task);

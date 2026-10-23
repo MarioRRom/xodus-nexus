@@ -96,6 +96,7 @@ export interface Game {
   title: string;
   path: string;
   storeId?: string;
+  offerProductId?: string; // Requested Store edition, not a license or replacement for the base identity.
   publisher?: string;
   installedVersion?: string;
   packageName?: string;
@@ -257,7 +258,7 @@ export interface GameContentItem {
   productId: string;
   title: string;
   access?: LibraryAccess;
-  status: 'installed' | 'available' | 'unlicensed' | 'unsupported';
+  status: 'installed' | 'available' | 'verify' | 'unlicensed' | 'unsupported' | 'bundle' | 'license-only';
   downloadBytes?: number;
   note: string;
 }
