@@ -1,9 +1,24 @@
 import { expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AccountGames, Cover, GameLaunchToolFields, GameTitle, HomePage, LibraryPagination, LibraryProductCard, StoreProductCard, Sidebar, type LibraryFilters } from './App';
+import { readFileSync } from 'node:fs';
+import { AccountGames, Cover, GameLaunchToolFields, GameTitle, HomePage, LibraryPagination, LibraryProductCard, StoreProductCard, Sidebar, SettingsPage, type LibraryFilters } from './App';
 import { defaultLaunchTools } from '../shared/launch-tools';
 import { demoSnapshot } from '../shared/demo-data';
 import type { AccountLibraryPage } from '../shared/types';
+
+it('keeps unknown-source counts in diagnostics instead of rendering a technical library banner', () => {
+  const source = readFileSync('src/renderer/App.tsx', 'utf8');
+  const library = source.slice(source.indexOf('export function AccountGames('), source.indexOf('function AccountGamesForUser('));
+  expect(library).not.toContain('unclassifiedEntitlements');
+  expect(library).not.toContain('Some active licenses have an unrecognized source');
+  // Actual failures and incomplete results still need a visible way to debug.
+  expect(library).toContain('visible?.skippedEntitlements || visible?.excludedEntitlements');
+  expect(library).toContain('Some license records could not be verified and were omitted.');
+  expect(library).toContain('{error ?');
+  expect(library).toContain('<BackendLogButton toast={toast} />');
+  const settings = renderToStaticMarkup(<SettingsPage data={demoSnapshot()} toast={() => {}} />);
+  expect(settings).toContain('Open backend diagnostic log');
+});
 
 it.each(['supported', 'unsupported', 'unknown'] as const)('uses the Store %s badge in Owned without enabling unsupported installs', installability => {
   const product: AccountLibraryPage['products'][number] = { productId: '9AAAAAAAAAAA', title: 'Owned & game', access: 'owned',
