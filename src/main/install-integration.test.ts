@@ -2,14 +2,17 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { demoSnapshot } from '../shared/demo-data.js';
 import { StateStore } from './store.js';
 import { GameContent } from './game-content.js';
+import { DownloadCleanup } from './download-cleanup.js';
 
 // Run the real IPC/admission/download lifecycle with synthetic child processes.
 // No account, executable, network, installed game or production profile is used.
 const h = vi.hoisted(() => ({
   root: '', wine: '', backend: {} as any, runtime: {} as any,
+  savedPausedId: '',
   handlers: new Map<string, (...args: any[]) => any>(),
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
@@ -110,6 +113,13 @@ beforeAll(async () => {
   const data = demoSnapshot(); h.backend = { ...data.backend, capabilities: { ...data.backend.capabilities, packageSelection: true }, binaryPath: path.join(h.root, 'synthetic-cli'), linuxRunPatch: 'test-patch' }; h.runtime = data.runtime;
   const store = new StateStore(path.join(h.root, 'userData'));
   await store.setSettings({ firstRunCompleted: true, market: 'US', runtimeRoot: path.join(h.root, 'runtime'), winePath: h.wine });
+  h.savedPausedId=randomUUID();
+  const partial={id:h.savedPausedId,kind:'install' as const,productId:'9TTTTTTTTTTT',title:'Paused fixture',
+    selectedContentId:'11111111-1111-4111-8111-111111111111',selectionMarket:'US',destination:path.join(h.root,'resumable-partial'),
+    status:'paused' as const,phase:'',log:[],progress:1,startedAt:''};
+  await new DownloadCleanup(path.join(h.root,'userData')).prepare(partial);
+  await fs.writeFile(path.join(partial.destination,'partial.bin'),'disposable interrupted download');
+  await store.addDownload(partial);
   const gamePath = path.join(h.root, 'installed-game'); await fs.mkdir(gamePath);
   await fs.writeFile(path.join(gamePath, 'MicrosoftGame.config'), '<Game><Identity Name="Example.Base" Version="1.0.0.0" Publisher="CN=Example"/><ShellVisuals DefaultDisplayName="Sample game"/><ExecutableList><Executable Name="Game.exe"/></ExecutableList><StoreId>9ZZZZZZZZZZZ</StoreId></Game>');
   await fs.writeFile(path.join(gamePath, 'Game.exe'), 'MZ fixture');
@@ -296,6 +306,21 @@ it('keeps new partials by default and refuses deletion of an existing folder or 
   expect(await fs.readFile(path.join(h.root, 'installed-game/Game.exe'), 'utf8')).toBe('MZ fixture');
   await ipc('cancel-download', update, 'keep'); h.downloads.splice(0);
   await expect(ipc('cancel-download', update, 'invalid')).rejects.toThrow('Invalid cancellation');
+});
+
+it('resumes a persisted partial through real IPC and preserves safe cancellation cleanup under the new task ID',async()=>{
+  expect(await ipc('download-cancel-options',h.savedPausedId)).toEqual({deleteFilesAllowed:true});
+  await ipc('resume-download',h.savedPausedId);
+  await vi.waitFor(()=>expect(h.downloads).toHaveLength(1));
+  const task=snapshot().downloads.find((task:any)=>task.productId==='9TTTTTTTTTTT');
+  expect(task.id).not.toBe(h.savedPausedId);expect(task.status).toBe('running');
+  expect(snapshot().downloads.some((task:any)=>task.id===h.savedPausedId)).toBe(false);
+  expect(await fs.readFile(path.join(task.destination,'partial.bin'),'utf8')).toBe('disposable interrupted download');
+  expect(await ipc('download-cancel-options',task.id)).toEqual({deleteFilesAllowed:true});
+  await ipc('cancel-download',task.id,'delete-files');
+  await expect(fs.access(task.destination)).rejects.toThrow();
+  expect(await fs.readFile(path.join(h.root,'installed-game','Game.exe'),'utf8')).toBe('MZ fixture');
+  h.downloads.splice(0);
 });
 
 it('routes a direct Durable through real managed-content admission and completion without changing the base or adding a game',async()=>{

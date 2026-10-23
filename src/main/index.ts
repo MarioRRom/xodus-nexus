@@ -458,10 +458,10 @@ function requestAuth(command: 'login' | 'logout'): Promise<void> {
   void job.then(clear, clear); return job;
 }
 
-async function startInstall(request: InstallRequest, updateGame?: Game): Promise<string> {
+async function startInstall(request: InstallRequest, updateGame?: Game, resumed?: DownloadTask): Promise<string> {
   ensureIdle(updateGame ? undefined : 'install');
   preparingInstall = true;
-  try { await prepareSystemWallet(); return await prepareInstall(request, updateGame); }
+  try { await prepareSystemWallet(); return await prepareInstall(request, updateGame, undefined, resumed); }
   finally { preparingInstall = false; }
 }
 
@@ -507,7 +507,7 @@ async function prepareContentInstall(id: string, productId: string, selectedCont
     return await prepareInstall({ productId, title: `${game.title}: ${item.title}`, destination }, undefined, { game, pkg, manager });
 }
 
-async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }): Promise<string> {
+async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }, resumed?: DownloadTask): Promise<string> {
   const binary = requireBackend('streaming');
   const productId = safeProductId(request.productId);
   const market = currentMarket();
@@ -561,6 +561,7 @@ async function prepareInstall(request: InstallRequest, updateGame?: Game, conten
     log: [],
     startedAt: new Date().toISOString(),
   };
+  if (resumed) await downloadCleanup.inheritResume(resumed, task);
   await store.addDownload(task);
   void enrichDownloadCovers([task], market).catch(() => { /* Artwork is optional. */ });
   const identity = `${authState.username}:${binary}:${market}`;
@@ -1362,6 +1363,7 @@ function registerIpc(): void {
       if (!task || task.status !== 'paused' || operations.has(id)) throw new Error('This download cannot be resumed.');
       // Remove only the stale queue row, never files/checkpoints. The new backend
       // process validates package identity and resumes durable byte checkpoints.
+      const resumed = structuredClone(task);
       task.status = 'cancelled';
       return (async () => {
         try {
@@ -1370,7 +1372,7 @@ function registerIpc(): void {
           if (task.kind === 'content') {
             if (!task.gameId) throw Error('Content download has no parent game.');
             await installGameContent(task.gameId, task.productId);
-          } else await startInstall({ productId: task.productId, title: task.title, destination: task.destination, selectedContentId: task.selectedContentId, selectionMarket: task.selectionMarket }, game);
+          } else await startInstall({ productId: task.productId, title: task.title, destination: task.destination, selectedContentId: task.selectedContentId, selectionMarket: task.selectionMarket }, game, resumed);
           await store.removeDownload(id);
         } catch (error) { task.status = 'paused'; throw error; }
         finally { emitSnapshot(); }
