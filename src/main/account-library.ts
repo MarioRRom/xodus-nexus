@@ -50,16 +50,28 @@ export function parseEntitlements(output: string, account: string, market: strin
   return { checkedAt: result.checkedAt, entries, skipped };
 }
 
-/** Parent chains must themselves be licensed; unknown/trial/shared access is not ownership. */
-export function entitlementKind(productId: string, entries: Map<string, Entitlement>, now = Date.now(), visited = new Set<string>()): Exclude<Kind, 'all'> | undefined {
-  if (visited.has(productId) || visited.size >= 16) return;
-  const item = entries.get(productId);
-  if (!item || item.status !== 'Active' || item.isTrial || item.special || item.sharingSource !== 'None'
-    || Date.parse(item.endDate) <= now) return;
-  const parent = item.satisfiedByProductId;
-  if (!parent) return plans.has(productId) ? undefined : 'owned';
-  if (plans.has(parent)) return 'gamepass';
-  return entitlementKind(parent, entries, now, new Set([...visited, productId]));
+type Resolution = { kind?: Exclude<Kind, 'all'>; reason?: 'access-unresolved' | 'access-special' | 'access-parent-unavailable' | 'access-cycle' | 'access-depth' };
+/** An active effective entitlement can have an absent source row. That is not permanent ownership. */
+function resolveEntitlement(productId: string, entries: Map<string, Entitlement>, now: number): Resolution {
+  const visited = new Set<string>();
+  let current = productId, subscription = false;
+  for (let depth = 0; depth < 16; depth++) {
+    if (visited.has(current)) return { reason: 'access-cycle' };
+    visited.add(current);
+    subscription ||= plans.has(current);
+    const item = entries.get(current);
+    if (!item) return depth ? subscription ? { kind: 'gamepass' } : { kind: 'other', reason: 'access-unresolved' } : {};
+    if (item.special) return { reason: 'access-special' };
+    if (item.status !== 'Active' || item.isTrial || item.sharingSource !== 'None' || Date.parse(item.endDate) <= now)
+      return depth ? { reason: 'access-parent-unavailable' } : {};
+    if (!item.satisfiedByProductId) return current === productId && plans.has(current) ? {}
+      : { kind: subscription ? 'gamepass' : 'owned' };
+    current = item.satisfiedByProductId;
+  }
+  return { reason: 'access-depth' };
+}
+export function entitlementKind(productId: string, entries: Map<string, Entitlement>, now = Date.now()): Exclude<Kind, 'all'> | undefined {
+  return resolveEntitlement(productId, entries, now).kind;
 }
 
 async function read(binary: string, market: string, signal: AbortSignal): Promise<string> {
@@ -84,7 +96,7 @@ export class AccountLibrary {
   private identity?: { account: string; binary: string; market: string };
   private generation = 0;
   private controller?: AbortController;
-  private cached?: { checkedAt: string; entries: Map<string, Entitlement>; skipped: number; until: number; key: string };
+  private cached?: { checkedAt: string; entries: Map<string, Entitlement>; skipped: number; unclassified: number; excluded: number; until: number; key: string };
   private job?: Promise<void>;
   private pages = new Map<string, AccountLibraryPage>();
   constructor(private catalog: Catalog, private reader: Reader = read) {}
@@ -116,7 +128,16 @@ export class AccountLibrary {
             throw error;
           }
           current();
-          this.cached = { ...data, until: Date.parse(data.checkedAt) + TTL, key: randomUUID() };
+          const counts = new Map<NonNullable<Resolution['reason']>, number>();
+          let unclassified = 0, excluded = 0;
+          for (const product of data.entries.keys()) {
+            const resolution = resolveEntitlement(product, data.entries, Date.parse(data.checkedAt));
+            if (resolution.kind === 'other') unclassified++;
+            if (resolution.reason && !resolution.kind) excluded++;
+            if (resolution.reason) counts.set(resolution.reason, (counts.get(resolution.reason) ?? 0) + 1);
+          }
+          for (const [stage, skipped] of counts) backendDiagnostic({ operation: 'library', event: 'validation', stage, skipped });
+          this.cached = { ...data, unclassified, excluded, until: Date.parse(data.checkedAt) + TTL, key: randomUUID() };
           this.pages.clear();
         })().finally(() => { if (generation === this.generation) { this.controller = undefined; this.job = undefined; } });
       }
@@ -137,7 +158,7 @@ export class AccountLibrary {
     return { checkedAt: cached.checkedAt, accessByProductId };
   }
   async get(kind: Kind, cursor?: string, refresh = false): Promise<AccountLibraryPage> {
-    if (kind !== 'all' && kind !== 'owned' && kind !== 'gamepass') throw Error('Invalid library filter.');
+    if (kind !== 'all' && kind !== 'owned' && kind !== 'gamepass' && kind !== 'other') throw Error('Invalid library filter.');
     if (typeof refresh !== 'boolean' || (cursor !== undefined && typeof cursor !== 'string')) throw Error('Invalid library request.');
     const cached = await this.load(cursor, refresh);
     if (cached !== this.cached || !this.identity) throw Error('Account library changed. Refresh this page.');
@@ -157,7 +178,7 @@ export class AccountLibrary {
       .sort((a,b) => Number(snapshotAccess.get(b) === 'owned') - Number(snapshotAccess.get(a) === 'owned') || a.localeCompare(b));
     let offset = 0;
     if (cursor) {
-      const match = cursor.match(/^([a-f0-9-]{36}):(all|owned|gamepass):(\d{1,5})$/);
+      const match = cursor.match(/^([a-f0-9-]{36}):(all|owned|gamepass|other):(\d{1,5})$/);
       if (!match || match[1] !== cached.key || match[2] !== kind) throw Error('Invalid or expired library page.');
       offset = Number(match[3]);
       if (offset % 60 || offset > ids.length) throw Error('Invalid library page offset.');
@@ -170,6 +191,7 @@ export class AccountLibrary {
     if (this.cached !== cached) throw Error('Library results changed. Refresh this page.');
     const allowed = new Set(ids.slice(offset, offset + 60));
     const page: AccountLibraryPage = { kind, checkedAt: cached.checkedAt, accessByProductId, skippedEntitlements: cached.skipped,
+      unclassifiedEntitlements: cached.unclassified, excludedEntitlements: cached.excluded,
       products: products.filter(product => allowed.has(product.productId) && accessByProductId[product.productId])
         .map(product => ({ ...product, access: accessByProductId[product.productId] }))
         .sort((a, b) => a.title.localeCompare(b.title)),

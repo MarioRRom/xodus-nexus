@@ -395,7 +395,7 @@ export function LibraryProductCard({ product, present, downloading, installing, 
     if (!disabled && document.activeElement === card.current) card.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
   }, [disabled]);
   return <article ref={card} className="catalog-card" data-gamepad-card tabIndex={disabled ? 0 : -1} aria-label={disabled ? `${product.title}, ${label}. Action unavailable` : undefined}>
-    <div className="catalog-card-main">{product.posterUrl ? <img src={product.posterUrl} alt={`${product.title} cover`} loading="lazy" /> : <div className="catalog-cover-placeholder"><Gamepad2 /></div>}<CatalogSupportBadge product={product} /><div><GameTitle title={product.title} /><small>{product.publisher ?? product.productId}</small><span>{product.access === 'owned' ? 'Owned' : 'Game Pass'}</span></div></div>
+    <div className="catalog-card-main">{product.posterUrl ? <img src={product.posterUrl} alt={`${product.title} cover`} loading="lazy" /> : <div className="catalog-cover-placeholder"><Gamepad2 /></div>}<CatalogSupportBadge product={product} /><div><GameTitle title={product.title} /><small>{product.publisher ?? product.productId}</small><span>{product.access === 'owned' ? 'Owned' : product.access === 'gamepass' ? 'Game Pass' : 'Other access'}</span></div></div>
     <button className="catalog-card-install" disabled={disabled} onClick={() => { if (!disabled) install(product); }}>{present ? <Check /> : <Download />}{label}</button>
   </article>;
 }
@@ -477,7 +477,7 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
   }
   return <section className="account-games">
     <div className="library-filters" data-gamepad-filters>
-      <label>Access<select aria-label="Access" value={kind} onChange={event => setKind(event.target.value as AccountLibraryPage['kind'])}><option value="all">All games</option><option value="owned">Owned</option><option value="gamepass">In Game Pass</option></select></label>
+      <label>Access<select aria-label="Access" value={kind} onChange={event => setKind(event.target.value as AccountLibraryPage['kind'])}><option value="all">All games</option><option value="owned">Owned</option><option value="gamepass">In Game Pass</option><option value="other">Other access</option></select></label>
       <label>Play state<select aria-label="Play state" value={playState} onChange={event => setPlayState(event.target.value as typeof playState)}><option value="all">All states</option><option value="installed">Installed</option><option value="installable">Ready to install</option></select></label>
       <label className="library-filter-search">Search<input aria-label="Search library" placeholder="Search your games" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <button className="secondary library-refresh" aria-label="Refresh library" title="Refresh library" disabled={!available || busy} onClick={() => load(true)}>{busy ? <LoaderCircle className="spin" /> : <RefreshCw />}</button>
@@ -485,13 +485,14 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
     <div className="account-games-results">
     {!available ? <p>{data.auth.stored !== true ? 'Sign in to load your account games. Installed games remain available.' : !data.backend.capabilities.library ? 'Update the Xodus backend to load account licenses.' : 'Wait for sign-in to finish.'}</p> : null}
       {error ? <div className="alert amber"><CircleAlert /><span>{error}</span><BackendLogButton toast={toast} /></div> : null}
-      {visible?.skippedEntitlements ? <div className="alert amber"><CircleAlert /><span>Some license records could not be verified and were omitted. This list may be incomplete.</span><BackendLogButton toast={toast} /></div> : null}
+      {visible?.skippedEntitlements || visible?.excludedEntitlements ? <div className="alert amber"><CircleAlert /><span>Some license records could not be verified and were omitted. This list may be incomplete.</span><BackendLogButton toast={toast} /></div> : null}
+      {visible?.unclassifiedEntitlements ? <div className="alert amber"><CircleAlert /><span>Some active licenses have an unrecognized source. Their games appear in All games and Other access, not Owned or Game Pass. Installation checks the license again.</span><BackendLogButton toast={toast} /></div> : null}
       <div className="catalog-grid" data-gamepad-grid>{rows.map(row => {
         if (row.game) {
           const game = row.game;
           const license = access(game);
           return <div className={`library-card-wrap catalog-card ${selectedId === game.id ? 'selected' : ''}`} data-gamepad-card key={game.id} onContextMenu={event => { event.preventDefault(); menu?.(game, event.clientX, event.clientY); }}>
-            <button className="library-card catalog-card-main" data-gamepad-auto-select="focus" data-gamepad-detail-target={game.id} onFocus={() => select?.(game, false)} onClick={() => select?.(game, true)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.left + 16, rect.top + 16); } }}><Cover game={game} /><div><GameTitle title={game.title} /><small>{game.publisher ?? 'Local installation'}</small><span>{license === 'owned' ? 'Owned' : license === 'gamepass' ? 'Game Pass' : 'Local installation'}</span></div></button>
+            <button className="library-card catalog-card-main" data-gamepad-auto-select="focus" data-gamepad-detail-target={game.id} onFocus={() => select?.(game, false)} onClick={() => select?.(game, true)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.left + 16, rect.top + 16); } }}><Cover game={game} /><div><GameTitle title={game.title} /><small>{game.publisher ?? 'Local installation'}</small><span>{license === 'owned' ? 'Owned' : license === 'gamepass' ? 'Game Pass' : license === 'other' ? 'Other access' : 'Local installation'}</span></div></button>
             <span className="catalog-card-status" title={game.installMessage}>{game.installState === 'incomplete' ? <><CircleAlert />Incomplete</> : game.installState === 'imported' ? <><FolderOpen />Imported</> : <><Check />{data.gameUpdates?.[game.id]?.available ? 'Update available' : 'Installed'}</>}</span>
             <button className="library-card-menu-button" data-game-menu-trigger data-gamepad-skip aria-label={`Options for ${game.title}`} aria-haspopup="menu" title={`Options for ${game.title}`} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.right, rect.bottom); }}><MoreHorizontal /></button>
           </div>;
@@ -515,7 +516,7 @@ function AccountGamesForUser(props: AccountGamesProps) {
 
 export function ContentList({ plan, disabled, pending, install }: { plan: GameContentPlan; disabled: boolean; pending?: string; install: (id: string) => void }) {
   return <div className="content-list">{plan.items.length ? plan.items.map(item => <article key={item.productId}>
-    <div><strong title={item.title}>{item.title}</strong><small>{item.access === 'owned' ? 'Owned' : item.access === 'gamepass' ? 'Game Pass' : 'License not verified'} · {item.status === 'installed' ? 'Installed' : item.status === 'available' ? 'Not installed' : item.status === 'unsupported' ? 'Unsupported package' : 'Unavailable'}</small>
+    <div><strong title={item.title}>{item.title}</strong><small>{item.access === 'owned' ? 'Owned' : item.access === 'gamepass' ? 'Game Pass' : item.access === 'other' ? 'Other access' : 'License not verified'} · {item.status === 'installed' ? 'Installed' : item.status === 'available' ? 'Not installed' : item.status === 'unsupported' ? 'Unsupported package' : 'Unavailable'}</small>
       {item.downloadBytes ? <small>Download: {(item.downloadBytes / 1024 ** 2).toFixed(1)} MiB</small> : null}<small>{item.note}</small></div>
     <button className="secondary" disabled={disabled || Boolean(pending) || !item.access || !['available', 'installed'].includes(item.status)} onClick={() => install(item.productId)}><Download />{pending === item.productId ? 'Preparing…' : item.status === 'installed' ? 'Repair' : 'Install'}</button>
   </article>) : <p>No related content packages are declared by this game.</p>}</div>;

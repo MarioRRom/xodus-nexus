@@ -25,6 +25,17 @@ it('keeps one My Library and Store navigation, no separate Game Pass page',()=>{
   expect(html).not.toContain('<span>Game Pass</span>');
 });
 
+it('labels other active access honestly and offers it alongside All games', () => {
+  const product: AccountLibraryPage['products'][number] = { productId: '9AAAAAAAAAAA', title: 'Other game', access: 'other', description: '', categories: [], installability: 'supported', supportNote: '' };
+  const card = renderToStaticMarkup(<LibraryProductCard product={product} present={false} downloading={false} canInstall install={() => {}} />);
+  expect(card).toContain('<span>Other access</span>');
+  expect(card).not.toContain('<span>Owned</span>'); expect(card).not.toContain('<span>Game Pass</span>');
+  expect(card).not.toContain('disabled=""');
+  const all = renderToStaticMarkup(<AccountGames data={demoSnapshot()} toast={() => {}} />);
+  expect(all).toContain('<option value="all" selected="">All games</option>');
+  expect(all).toContain('<option value="other">Other access</option>');
+});
+
 it('counts waiting installations in the queue shortcut while a game is running', () => {
   const data = demoSnapshot();
   data.downloads = [{ ...data.downloads[0], status: 'running' }, { ...data.downloads[0], id: 'waiting', status: 'queued' }];

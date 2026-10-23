@@ -93,13 +93,60 @@ it('provides fresh access for content planning without loading unrelated catalog
   library.select(undefined,undefined,'US'); await expect(library.access()).rejects.toThrow('Sign in');
 });
 
-it('distinguishes direct/owned bundle access from subscriptions, without guessing missing parents',()=>{
+it('distinguishes owned bundles and Game Pass from active access whose source is unknown',()=>{
   const {entries}=parseEntitlements(output([row(),row(B,{satisfiedByProductId:A}),row(C,{satisfiedByProductId:'CFQ7TTC0KGQ8'})]),'one@example.test','US');
   expect(entitlementKind(A,entries)).toBe('owned');
   expect(entitlementKind(B,entries)).toBe('owned');
   expect(entitlementKind(C,entries)).toBe('gamepass');
-  entries.delete(A); expect(entitlementKind(B,entries)).toBeUndefined();
+  entries.delete(A); expect(entitlementKind(B,entries)).toBe('other');
   entries.set(A,row(A,{satisfiedByProductId:B})); expect(entitlementKind(B,entries)).toBeUndefined();
+});
+
+it.each(['CFQ7TTBZT8LN', 'CFQ7TTC0K5DH', '9UNKNOWNROOT'])('keeps a valid child of missing parent %s visible without claiming ownership', async parent => {
+  const library = new AccountLibrary(async ids => ids.map(product), async () => output([row(A, { satisfiedByProductId: parent })]));
+  library.select('one@example.test', '/not-executed', 'US');
+  const all = await library.get('all');
+  expect(all.products).toMatchObject([{ productId: A, access: 'other' }]);
+  expect(all.skippedEntitlements).toBe(0);
+  expect(all.unclassifiedEntitlements).toBe(1);
+  expect((await library.get('owned')).products).toEqual([]);
+  expect((await library.get('gamepass')).products).toEqual([]);
+  expect((await library.get('other')).products).toHaveLength(1);
+  expect((await library.access()).accessByProductId).toEqual({ [A]: 'other' });
+});
+
+it('does not bypass an explicitly expired, revoked, shared, trial or special subscription parent', () => {
+  const parent = 'CFQ7TTC0KGQ8';
+  for (const extra of [{ isTrial: true }, { special: true }, { status: 'Revoked' }, { endDate: '2000-01-01T00:00:00Z' }, { sharingSource: 'Family' }]) {
+    const parsed = parseEntitlements(output([row(A, { satisfiedByProductId: parent }), row(parent, extra)]), 'one@example.test', 'US');
+    expect(entitlementKind(A, parsed.entries)).toBeUndefined();
+  }
+});
+
+it('reports policy exclusions separately and never recovers broken chains as other access', async () => {
+  const D = '9DDDDDDDDDDD';
+  const library = new AccountLibrary(async ids => ids.map(product), async () => output([
+    row(A, { special: true }), row(B, { satisfiedByProductId: C }), row(C, { satisfiedByProductId: B }), row(D),
+  ]));
+  library.select('one@example.test', '/not-executed', 'US');
+  const result = await library.get('all');
+  expect(result.products.map(p => p.productId)).toEqual([D]);
+  expect(result.excludedEntitlements).toBe(3);
+  expect(result.unclassifiedEntitlements).toBe(0);
+});
+
+it('keeps other-access pagination, account binding and expiration gates intact', async () => {
+  const entries = Array.from({ length: 61 }, (_, i) => row(String(i).padStart(12, '0'), { satisfiedByProductId: 'CFQ7TTBZT8LN' }));
+  const library = new AccountLibrary(async ids => ids.map(product), async () => output(entries));
+  library.select('one@example.test', '/not-executed', 'US');
+  const first = await library.get('other');
+  expect(first.products).toHaveLength(60);
+  expect((await library.get('other', first.cursor)).products).toHaveLength(1);
+  await expect(library.get('all', first.cursor)).rejects.toThrow();
+  library.select(undefined, undefined, 'US');
+  await expect(library.get('other', first.cursor)).rejects.toThrow('Sign in');
+  const { entries: parsed } = parseEntitlements(output(entries), 'one@example.test', 'US');
+  expect(entitlementKind(entries[0].productId, parsed, Date.parse('2100-01-01T00:00:00Z'))).toBeUndefined();
 });
 
 it('never labels expired, trial, special, revoked or shared entitlements as owned',()=>{

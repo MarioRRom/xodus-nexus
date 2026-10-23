@@ -1,7 +1,7 @@
 import { constants, promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { Game, GameContentItem, GameContentPlan } from '../shared/types.js';
+import type { Game, GameContentItem, GameContentPlan, LibraryAccess } from '../shared/types.js';
 import { children, parsePackageXml, single, type XmlNode } from './package-xml.js';
 
 const productId = /^[A-Z0-9]{12}$/;
@@ -12,7 +12,7 @@ interface Manifest {
   related: string[]; allowed: string[]; dependency?: string;
 }
 export interface ContentPackage { productId: string; contentId: string; family: string; downloadBytes?: number }
-type Access = Record<string, 'owned' | 'gamepass'>;
+type Access = Record<string, LibraryAccess>;
 type RecordValue = Record<string, any>;
 
 async function boundedFile(file: string): Promise<string> {

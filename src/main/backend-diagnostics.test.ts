@@ -6,6 +6,21 @@ import { spawn } from 'node:child_process';
 import { BackendDiagnostics, BackendDiagnosticReader, observeBackendChild, setBackendDiagnostics } from './backend-diagnostics.js';
 import { spawnTracked } from './process.js';
 
+it('records bounded access-resolution reasons without product IDs, account data or arbitrary text', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-access-diagnostic-'));
+  try {
+    const log = new BackendDiagnostics(root);
+    for (const stage of ['access-unresolved', 'access-special', 'access-parent-unavailable', 'access-cycle', 'access-depth'])
+      log.record({ operation: 'library', event: 'validation', stage, skipped: 3 });
+    log.record({ operation: 'library', event: 'validation', stage: 'CFQ7TTBZT8LN private@example.test', skipped: 300_000 });
+    const content = (await log.read()).content;
+    const records = content.trim().split('\n').map(line => JSON.parse(line));
+    expect(records.filter(row => row.stage)).toHaveLength(5);
+    expect(records.filter(row => row.skipped === 3)).toHaveLength(5);
+    expect(content).not.toMatch(/CFQ7TTBZT8LN|private@example.test|300000/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 it('accepts only a bounded ticket error code for profile/library and never stores fault text or URLs', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-ticket-diagnostic-'));
   try {
