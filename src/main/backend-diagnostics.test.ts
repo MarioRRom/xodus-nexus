@@ -64,20 +64,21 @@ it('records allowlisted content-license stages/status only for licensing operati
   for (const operation of ['streaming', 'download', 'license', 'run']) {
     const events: unknown[] = [];
     const reader = new BackendDiagnosticReader(operation, event => events.push(event));
-    const input = Buffer.from('private@example.test token=SECRET\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403\r\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-schema 200\n');
+    const input = Buffer.from('private@example.test token=SECRET\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403\r\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-schema 200\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\n');
     for (const byte of input) reader.push(Buffer.from([byte]));
     expect(events).toEqual([
       { operation, event: 'diagnostic', stage: 'content-http', status: 403, skipped: undefined },
       { operation, event: 'diagnostic', stage: 'content-schema', status: 200, skipped: undefined },
+      { operation, event: 'diagnostic', stage: 'content-device-limit', status: 200, skipped: undefined },
     ]);
     for (const line of ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 unknown 403',
       'prefix NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403', 'NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403 private-secret',
       'NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 999']) reader.push(Buffer.from(line+'\n'));
-    expect(events).toHaveLength(2); expect(JSON.stringify(events)).not.toMatch(/SECRET|example.test|private-secret/);
+    expect(events).toHaveLength(3); expect(JSON.stringify(events)).not.toMatch(/SECRET|example.test|private-secret/);
   }
   for (const operation of ['profile', 'login', 'library']) {
     const events: unknown[] = [];
-    new BackendDiagnosticReader(operation, event => events.push(event)).push(Buffer.from('NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403\n'));
+    new BackendDiagnosticReader(operation, event => events.push(event)).push(Buffer.from('NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 403\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\n'));
     expect(events).toHaveLength(0);
   }
 });

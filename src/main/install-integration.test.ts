@@ -16,7 +16,7 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
-  game: undefined as undefined | { finish: () => void },
+  game: undefined as undefined | { finish: (code?: number, output?: string) => void },
   quit: vi.fn(),
   blockDisplay: vi.fn(() => 7), releaseDisplay: vi.fn(() => true),
   steamProfiles: [] as string[], steamIsRunning: true,
@@ -99,7 +99,7 @@ vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_
   h.launchEnvironments.push({...options.env});
   let resolve!: (result: { code: number; output: string }) => void;
   const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
-  h.game = { finish: () => resolve({ code: 0, output: '' }) };
+  h.game = { finish: (code = 0, output = '') => resolve({ code, output }) };
   return { child: {}, result, cleanup: async () => {}, stop: async () => resolve({ code: 0, output: '' }), forceStop: async () => {} };
 } }));
 
@@ -375,6 +375,27 @@ it('gates runtime DLC hints, clears inherited foreign hints and still launches a
     discover.mockRestore();h.discoverySupported=false;h.blockDisplay.mockClear();h.releaseDisplay.mockClear();
     if(old===undefined)delete process.env.NEXUS_RELATED_PRODUCT_IDS;else process.env.NEXUS_RELATED_PRODUCT_IDS=old;
   }
+});
+
+it('shows safe specific licensing guidance on failed launch and preserves later non-license errors', async () => {
+  for (const [output, expected] of [
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\nprivate@example.test t=SECRET', 'Microsoft Store device limit reached'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-not-entitled 200', 'purchased edition'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 501', 'server error'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-parsed 200\nlater extraction failure', 'later extraction failure'],
+  ]) {
+    await ipc('launch-game', 'sample');
+    h.game!.finish(1, output);
+    await vi.waitFor(() => expect(snapshot().gameOperation.status).toBe('failed'));
+    const error = snapshot().gameOperation.error;
+    expect(error).toContain(expected);
+    if (expected === 'Microsoft Store device limit reached') {
+      expect(error).toContain('https://account.microsoft.com/devices/content');
+      expect(error).not.toMatch(/SECRET|example.test|NEXUS_CONTENT_LICENSE/);
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
 });
 
 it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/download safely', async () => {

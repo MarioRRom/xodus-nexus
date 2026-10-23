@@ -370,3 +370,18 @@ test('conditional entitlement provenance is typed without changing account, down
     assert.ok(patch.includes(expected), expected);
   assert.doesNotMatch(patch, /^[+-].*(?:store_session|\.get_user|\.get_license|Authorization|\.send\(|\.save_|\.remove_)/m);
 });
+
+test('Store device-limit guidance is a bounded response-only change with the official management URL', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(patch => patch.file === 'xodus-content-device-limit.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]), [
+    'crates/xodus/src/licensing/content_response.rs', 'crates/xodus/src/licensing/content_response_tests.rs',
+  ]);
+  for (const text of ['satisfaction_failure.code == 501', 'content-device-limit',
+    'https://account.microsoft.com/devices/content', 'content_license_device_limit_http_is_not_an_http501_and_never_retries'])
+    assert.ok(patch.includes(text), text);
+  assert.doesNotMatch(patch, /^[+-].*(?:\.send\(|\.post\(|Authorization|\.save_|\.remove_|ensure_device|init_secrets)/m);
+});
