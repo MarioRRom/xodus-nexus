@@ -71,6 +71,15 @@ Flatpak version available through Discover. Other browsers are not supported.
 - If no wallet exists, use **Create wallet** and complete the system dialog. On KDE, choose **Classic, blowfish encrypted file** for a normal password-based wallet if you do not have a GPG encryption key. An empty password does not protect stored credentials.
 - If setup or the password dialog does not work in Game Mode, try it in Desktop Mode first. If the problem persists, include the backend diagnostic log in your issue report.
 
+## Microsoft Store device limit
+
+Microsoft Store supports up to 10 linked devices. If downloading or launching a
+game fails with **Microsoft Store device limit reached** (licensing code 501),
+open [Microsoft Store device management](https://account.microsoft.com/devices/content)
+and sign in with the same Microsoft account. Unlink only an old device you no
+longer use, then retry in Nexus. You do not need to sign out or reset the wallet.
+Other license errors can have different causes.
+
 [Documentation](https://github.com/domsvoboda/xodus-nexus/wiki) ·
 [Report an issue](https://github.com/domsvoboda/xodus-nexus/issues)
 
@@ -99,7 +108,7 @@ but have not been verified and may encounter compatibility issues.
 | Deep Rock Galactic | Yes | Playable online. |
 | Minecraft Dungeons | Yes | Playable online with launcher 0.3.5; [ownership failures](https://github.com/domsvoboda/xodus-nexus/issues/80) also reported on other setups. |
 | Minecraft Dungeons II | Yes | Playable online. |
-| Minecraft for Windows | Yes | Playable online. |
+| Minecraft for Windows | Yes | Playable online. For licensing code 501, check the [Store device limit](#microsoft-store-device-limit). |
 | Minecraft Launcher | Yes | Sign-in and Java download/startup work with launcher 0.3.5; Java online unverified. [Login failure](https://github.com/domsvoboda/xodus-nexus/issues/107) also reported on another setup. |
 | No Man's Sky | Yes | Playable online. |
 | Valor Mortis | Yes | Fully playable. |
