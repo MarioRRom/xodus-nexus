@@ -80,9 +80,13 @@ Flatpak version available through Discover. Other browsers are not supported.
 | --- | --- |
 | Xodus Nexus | Store browsing, library, installation queue and launch controls. |
 | Nexus backend | Patched build of [Xodus](https://github.com/xodus-gaming/xodus) for account sign-in, license checks, package downloads and launch preparation. |
-| Nexus runtime | Built on [Xodus Proton](https://github.com/xodus-gaming/Proton) and [Xodus XGameRuntime](https://github.com/xodus-gaming/xgameruntime), with additional Nexus compatibility patches. |
+| Nexus runtime | Shared [Wine](https://www.winehq.org/) / [Proton](https://github.com/ValveSoftware/Proton) runtime with [Xodus XGameRuntime](https://github.com/xodus-gaming/xgameruntime) and additional Nexus compatibility patches. |
 
 Every game uses the same launch path and shared runtime.
+
+The experimental [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
+is based on Valve's Proton Experimental. It is not yet installed automatically
+by released launchers.
 
 ## Compatible games
 

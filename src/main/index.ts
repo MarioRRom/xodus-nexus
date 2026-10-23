@@ -793,7 +793,7 @@ async function gameLaunchOptions(id: string): Promise<GameLaunchOptions> {
     cloudSaves: previewRuntime && serviceAvailable,
     cloudReason: !previewRuntime ? 'The selected Wine runtime does not include the cloud-save preview.' : !serviceAvailable ? 'This Xodus backend has no xodus-service.' : undefined,
     vcInstall: protonAvailable,
-    vcReason: protonAvailable ? undefined : 'VC++ installation requires a full Xodus Proton distribution.',
+    vcReason: protonAvailable ? undefined : 'VC++ installation requires a full Proton runtime.',
   };
 }
 
@@ -837,7 +837,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
   const locale = supportedGameLocale(game.locale ?? '', await gameLocales(game));
   const titleId = await gameTitleId(game);
   const wine = selectedWinePath(store.settings.winePath, store.settings.runtimeRoot, runtime.current.winePath);
-  if (!wine) throw new Error('Select a Wine/Xodus Proton binary in Settings.');
+  if (!wine) throw new Error('Select a Wine / Proton binary in Settings.');
   try { await fs.access(wine, constants.X_OK); }
   catch { throw new Error(`The selected Wine runtime is unavailable: ${wine}. Select or reinstall Xodus Runtime in Settings.`); }
   const cloudRuntime = await cloudSaveRuntime(wine);
@@ -1033,7 +1033,7 @@ async function installGameVcRuntime(id: string): Promise<void> {
   try {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
     const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'));
-    if (!protonRunner) throw new Error('VC++ installation requires Xodus Proton, not a standalone Wine binary.');
+    if (!protonRunner) throw new Error('VC++ installation requires a full Proton runtime, not a standalone Wine binary.');
     const prefix = path.join(compatibilityDataPath, 'pfx');
     const previous = await installedVcRuntimeVersion(prefix);
     if (previous && versionAtLeast(previous, VC_REDIST_VERSION)) {
