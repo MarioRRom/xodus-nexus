@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { demoSnapshot } from '../shared/demo-data.js';
 import { StateStore } from './store.js';
+import { GameContent } from './game-content.js';
 
 // Run the real IPC/admission/download lifecycle with synthetic child processes.
 // No account, executable, network, installed game or production profile is used.
@@ -23,6 +24,9 @@ const h = vi.hoisted(() => ({
   holdCancellation: false,
   holdAccountReads: false,
   contentSupported: false,
+  discoverySupported: false,
+  libraryReads: 0,
+  launchEnvironments: [] as NodeJS.ProcessEnv[],
   planOverrides: new Map<string, any>(),
   libraryRows: [] as any[],
   accountReads: [] as ((result: { code: number; output: string }) => void)[],
@@ -64,16 +68,16 @@ vi.mock('./install-plan.js', async original => ({ ...await original<typeof impor
   }),
 }));
 vi.mock('./xodus-service.js', () => ({ cloudSaveRuntime: async () => false, unbridgedCloudSaveRuntime: async () => false,
-  selectedWinePath: () => h.wine, storeContentRuntime: async () => h.contentSupported, startXodusService: vi.fn() }));
+  selectedWinePath: () => h.wine, storeContentRuntime: async () => h.contentSupported, storeDiscoveryRuntime: async () => h.discoverySupported, startXodusService: vi.fn() }));
 vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async () => {}, syncUnrealCultureGameIni: async () => {} }));
 vi.mock('./game-wrapper.js', () => ({ prepareGameWrapper: async () => ({ command: h.wine, cleanup: async () => {} }) }));
 vi.mock('./process.js', () => ({
   run: async (_command: string, args: string[]) => ({ code: 0, output: args[0] === 'account' ? JSON.stringify({ stored: true, username: 'sample@example.test' }) : '' }),
   spawnTracked: (_command: string, args: string[], options: any) => {
-    if (args[0] === 'library') return {
+    if (args[0] === 'library') { h.libraryReads++;return {
       child: { kill: vi.fn(), stderr: { on() {}, removeListener() {} } },
       result: Promise.resolve({code:0,output:JSON.stringify({schema:1,account:'sample@example.test',market:'US',checkedAt:new Date().toISOString(),entitlements:h.libraryRows})}),
-    };
+    }; }
     if (args[0] === 'account') return {
       child: { kill: vi.fn(() => true) },
       result: h.holdAccountReads
@@ -88,7 +92,8 @@ vi.mock('./process.js', () => ({
     return { child: { stdin: { on() {}, write: (line: string) => progress(JSON.parse(line).command === 'pause') }, kill: (signal: string) => { h.signals.push(signal); if (!h.holdCancellation) resolve({ code: 130, output: '' }); return true; } }, result };
   },
 }));
-vi.mock('./game-process.js', () => ({ spawnGameProcess: async () => {
+vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_args:string[],options:{env:NodeJS.ProcessEnv}) => {
+  h.launchEnvironments.push({...options.env});
   let resolve!: (result: { code: number; output: string }) => void;
   const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
   h.game = { finish: () => resolve({ code: 0, output: '' }) };
@@ -320,6 +325,31 @@ it('routes a direct Durable through real managed-content admission and completio
     expect(snapshot().games).toHaveLength(gamesBefore);
     expect((await fs.readdir(task.destination))).toContain('.nexus-content-complete.json');
   }finally{globalThis.fetch=fetcher;h.contentSupported=false;h.downloads.splice(0);h.notifications.splice(0);}
+});
+
+it('gates runtime DLC hints, clears inherited foreign hints and still launches after optional discovery fails without reading accounts',async()=>{
+  const old=process.env.NEXUS_RELATED_PRODUCT_IDS;
+  process.env.NEXUS_RELATED_PRODUCT_IDS='9FFFFFFFFFFF';
+  const discover=vi.spyOn(GameContent.prototype,'relatedProducts');
+  const beforeReads=h.libraryReads;
+  try{
+    for(const mode of ['legacy','supported','failure']){
+      h.discoverySupported=mode!=='legacy';
+      if(mode==='failure')discover.mockRejectedValueOnce(Error('private.invalid/signed?secret'));
+      else if(mode==='supported')discover.mockResolvedValueOnce(['9MMMMMMMMMMM']);
+      await ipc('launch-game','sample');expect(snapshot().gameOperation.status).toBe('running');
+      expect(h.launchEnvironments.at(-1)!.NEXUS_RELATED_PRODUCT_IDS).toBe(mode==='supported'?'9MMMMMMMMMMM':undefined);
+      expect(h.libraryReads).toBe(beforeReads);
+      if(mode==='legacy')expect(discover).not.toHaveBeenCalled();
+      if(mode==='failure')expect(snapshot().gameOperation.log.join('\n')).not.toContain('secret');
+      h.game!.finish();await vi.waitFor(()=>expect(snapshot().gameOperation.status).toBe('complete'));
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    expect(discover).toHaveBeenCalledTimes(2);
+  }finally{
+    discover.mockRestore();h.discoverySupported=false;h.blockDisplay.mockClear();h.releaseDisplay.mockClear();
+    if(old===undefined)delete process.env.NEXUS_RELATED_PRODUCT_IDS;else process.env.NEXUS_RELATED_PRODUCT_IDS=old;
+  }
 });
 
 it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/download safely', async () => {

@@ -17,7 +17,7 @@ import { inspectGameDirectory, StateStore } from './store.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { CatalogService } from './catalog.js';
-import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
+import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
 import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION, versionAtLeast } from './vc-runtime.js';
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
@@ -914,6 +914,16 @@ async function prepareGameLaunch(id: string): Promise<void> {
     const environment = antiCheatEnvironment(gameLocaleEnvironment(gameWindowEnvironment(gameLoggingEnvironment(protonRunner
       ? { ...process.env }
       : { ...process.env, WINEPREFIX: legacyPrefixRoot, WINEARCH: 'win64' }, verboseLogs)), locale));
+    // Never inherit another title's discovery list. Hints are scoped public
+    // metadata, not licenses, and cannot make an optional lookup block Play.
+    delete environment.NEXUS_RELATED_PRODUCT_IDS;
+    if (await storeDiscoveryRuntime(wine)) {
+      const related = await contentManager().relatedProducts(game, accountLibrary.peekAccess(), currentMarket()).catch(() => {
+        addGameLog('Additional DLC discovery unavailable. Continuing with package-declared content.');
+        return [] as string[];
+      });
+      if (related.length) environment.NEXUS_RELATED_PRODUCT_IDS = related.join(',');
+    }
     const contentRoots = await contentManager().roots(game).catch(error => {
       addGameLog(`Managed content discovery unavailable: ${(error as Error).message}`);
       return [] as string[];

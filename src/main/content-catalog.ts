@@ -36,14 +36,16 @@ export class ContentCatalog {
   private cacheBytes = 0;
   constructor(private fetcher: typeof fetch = fetch) {}
 
-  async discover(base: { storeId: string; name: string; related: string[] }, access: Record<string, LibraryAccess>, market: string, offerId?: string): Promise<{ Products: Product[]; related: string[]; verify: string[] }> {
+  async discover(base: { storeId: string; name: string; related: string[] }, access: Record<string, LibraryAccess>, market: string, offerId?: string, externalSignal?: AbortSignal): Promise<{ Products: Product[]; related: string[]; verify: string[] }> {
     const ownedIds = Object.keys(access);
     if (!validId(base.storeId) || base.related.length > 256 || base.related.some(id => !validId(id))
       || ownedIds.length > 10_000 || ownedIds.some(id => !validId(id))) throw Error('Invalid content discovery scope.');
     market = /^[A-Z]{2}$/.test(market.toUpperCase()) ? market.toUpperCase() : 'US';
-    const signal = AbortSignal.timeout(90_000), products = new Map<string, Product>(), fetched = new Set<string>();
+    const signal = AbortSignal.any([AbortSignal.timeout(90_000), ...(externalSignal ? [externalSignal] : [])]), products = new Map<string, Product>(), fetched = new Set<string>();
+    signal.throwIfAborted();
     let transferred = 0;
     const load = async (ids: string[]) => {
+      signal.throwIfAborted();
       const pending = [...new Set(ids)].filter(id => !fetched.has(id));
       const batches: string[][] = [];
       for (const id of pending) {
@@ -66,6 +68,7 @@ export class ContentCatalog {
             let bytes = 0;
             try {
               for (;;) {
+                signal.throwIfAborted();
                 const result = await reader.read(); if (result.done) break;
                 bytes += result.value.byteLength; transferred += result.value.byteLength;
                 if (bytes > 8_000_000 || transferred > 64_000_000) throw Error('Content metadata response is too large.');

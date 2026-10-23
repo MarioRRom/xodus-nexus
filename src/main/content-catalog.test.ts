@@ -72,3 +72,16 @@ it('bounds initial input and related graph without silently losing results',asyn
   const huge=fixture([product(BASE,'Game',nodes)]);
   await expect(huge.catalog.discover(base,{},'US')).rejects.toThrow('large');
 });
+
+it('honors a caller deadline even for cached metadata and aborts public network work',async()=>{
+  const {catalog,fetcher}=fixture();await catalog.discover(base,{},'US');
+  const beforeAbort=vi.mocked(fetcher).mock.calls.length;
+  const controller=new AbortController();controller.abort();
+  await expect(catalog.discover(base,{},'US',undefined,controller.signal)).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(beforeAbort);
+  const pending=vi.fn(async(_url:URL|RequestInfo,options?:RequestInit)=>new Promise<Response>((_resolve,reject)=>{
+    options!.signal!.addEventListener('abort',()=>reject(options!.signal!.reason),{once:true});
+  }));
+  await expect(new ContentCatalog(pending as typeof fetch).discover(base,{},'US',undefined,AbortSignal.timeout(20))).rejects.toThrow();
+  expect(pending).toHaveBeenCalledTimes(1);
+});

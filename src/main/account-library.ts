@@ -147,6 +147,15 @@ export class AccountLibrary {
     return this.cached!;
   }
   /** Scoped callers can read access without fetching unrelated library artwork. */
+  peekAccess(): AccountLibraryPage['accessByProductId'] {
+    const accessByProductId: AccountLibraryPage['accessByProductId'] = {};
+    if (!this.identity || !this.cached || this.cached.until <= Date.now()) return accessByProductId;
+    for (const product of this.cached.entries.keys()) {
+      const access = entitlementKind(product, this.cached.entries);
+      if (access) accessByProductId[product] = access;
+    }
+    return accessByProductId;
+  }
   async access(refresh = false): Promise<{ checkedAt: string; accessByProductId: AccountLibraryPage['accessByProductId'] }> {
     const cached = await this.load(undefined, refresh);
     if (cached !== this.cached || !this.identity) throw Error('Account library changed. Refresh this page.');

@@ -95,6 +95,12 @@ export async function storeContentRuntime(winePath: string): Promise<boolean> {
   return ['xstore-entitlements-v1', 'xpackage-content-v1', 'xstore-package-license-v1', 'xodus-tcp-bridge-v1', 'cloud-saves-pr28'].every(feature => features.includes(feature));
 }
 
+export async function storeDiscoveryRuntime(winePath: string): Promise<boolean> {
+  const features = await runtimeFeatures(winePath);
+  return ['xstore-related-discovery-v1', 'xstore-durable-license-v1', 'xstore-entitlements-v1', 'xodus-tcp-bridge-v1']
+    .every(feature => features.includes(feature));
+}
+
 export async function unbridgedCloudSaveRuntime(winePath: string): Promise<boolean> {
   const features = await runtimeFeatures(winePath);
   return features.includes('cloud-saves-pr28') && !features.includes('xodus-tcp-bridge-v1');

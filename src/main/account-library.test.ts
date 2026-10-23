@@ -11,6 +11,21 @@ const row=(productId=A, extra={})=>({productId,status:'Active',isTrial:false,sha
 const output=(entries=[row()],account='one@example.test',market='US')=>JSON.stringify({schema:1,account,market,checkedAt:new Date().toISOString(),entitlements:entries});
 const product=(productId:string):CatalogProduct=>({productId,title:productId,description:'',categories:[],installability:'supported',supportNote:''});
 
+it('provides account-bound fresh in-memory discovery hints without starting reads or reusing stale rights', async () => {
+  const reader=vi.fn(async()=>output([row(),row(B,{satisfiedByProductId:'9ZZZZZZZZZZZ'}),row(C,{isTrial:true})]));
+  const library=new AccountLibrary(async ids=>ids.map(product),reader);
+  library.select('one@example.test','/backend','US');
+  expect(library.peekAccess()).toEqual({});expect(reader).not.toHaveBeenCalled();
+  await library.access(); const cached=library.peekAccess();
+  expect(cached).toEqual({[A]:'owned',[B]:'other'}); cached[A]='gamepass';
+  expect(library.peekAccess()[A]).toBe('owned');expect(reader).toHaveBeenCalledTimes(1);
+  vi.useFakeTimers();
+  try { vi.setSystemTime(Date.now()+300_001);expect(library.peekAccess()).toEqual({});expect(reader).toHaveBeenCalledTimes(1); }
+  finally {vi.useRealTimers();}
+  library.select('different@example.test','/backend','US');expect(library.peekAccess()).toEqual({});
+  library.select(undefined,undefined,'US');expect(library.peekAccess()).toEqual({});
+});
+
 it('keeps unsupported and unknown owned games separate from Game Pass without exposing add-ons or unlicensed products', async () => {
   const D = '9DDDDDDDDDDD', E = '9EEEEEEEEEEE', F = '9FFFFFFFFFFF';
   const record = (productId: string, kind = 'Game', format = 'MSIXVC') => ({ ProductId: productId, ProductType: kind,

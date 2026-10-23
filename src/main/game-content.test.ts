@@ -52,6 +52,16 @@ it('parses bounded XML with namespaces and encoded identity values, rejects malf
   expect(parsePackageXml('<Root><!-- comment --><ns:Child A="a &amp; b">&#x41;</ns:Child></Root>').children[0]).toMatchObject({ name: 'ns:Child', attributes: { A: 'a & b' }, text: 'A' });
   for (const xml of ['<!DOCTYPE Game [<!ENTITY x SYSTEM "file:///secret">]><Game/>', '<A><B></A>', '<A/><B/>', '<A X="1" X="2"/>', '<A>&unknown;</A>', '<A X="bad&"/>', '<A>' + '<B>'.repeat(40), '<A>\0</A>', '<A/>garbage']) expect(() => parsePackageXml(xml)).toThrow();
 });
+
+it('passes scoped public related IDs to the runtime without inventing account access',async()=>{
+  const f=await fixture();const before=await fs.readFile(path.join(f.base,'MicrosoftGame.Config'),'utf8');
+  const ids=await f.manager.relatedProducts(f.game,{},'CZ');
+  expect(ids.sort()).toEqual([OWN,GP,PAID].sort());
+  expect(await fs.readFile(path.join(f.base,'MicrosoftGame.Config'),'utf8')).toBe(before);
+  for(const [,options] of vi.mocked(f.fetcher).mock.calls)expect(options?.headers).toBeUndefined();
+  const controller=new AbortController();controller.abort();
+  await expect(f.manager.relatedProducts(f.game,{},'CZ',controller.signal)).rejects.toThrow();
+});
 it('does not infer licenses from catalog membership, a bundle title or disk', () => {
   const result = contentOffers(contentManifest(baseXml), catalog(), { [OWN]: 'owned', [GP]: 'gamepass' });
   expect(result.items.map(item => [item.productId, item.access, item.status])).toEqual([[OWN, 'owned', 'available'], [GP, 'gamepass', 'available'], [PAID, undefined, 'unlicensed']]);
