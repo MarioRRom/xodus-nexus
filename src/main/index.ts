@@ -24,7 +24,7 @@ import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION,
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
 import { deleteGameDirectory } from './game-delete.js';
 import { spawnGameProcess, type GameProcess } from './game-process.js';
-import { gameLocaleEnvironment, manifestLocales, manifestTitleId, supportedGameLocale } from './game-locale.js';
+import { gameLocaleEnvironment, installedGameLocales, installedGameTitleId, supportedGameLocale } from './game-locale.js';
 import { antiCheatEnvironment } from './anti-cheat.js';
 import { gameLaunchArguments, preparedGameWine } from './game-launch.js';
 import { prepareGameWrapper, type GameWrapper } from './game-wrapper.js';
@@ -810,13 +810,11 @@ async function gameLaunchOptions(id: string): Promise<GameLaunchOptions> {
 }
 
 async function gameLocales(game: Game): Promise<string[]> {
-  const xml = await fs.readFile(path.join(game.path, 'MicrosoftGame.config'), 'utf8').catch(() => '');
-  return manifestLocales(xml);
+  return installedGameLocales(game.path);
 }
 
 async function gameTitleId(game: Game): Promise<string | undefined> {
-  const xml = await fs.readFile(path.join(game.path, 'MicrosoftGame.config'), 'utf8').catch(() => '');
-  return manifestTitleId(xml);
+  return installedGameTitleId(game.path);
 }
 
 async function launchGame(id: string): Promise<void> {
@@ -846,8 +844,8 @@ async function prepareGameLaunch(id: string): Promise<void> {
   emitSnapshot();
   const binary = requireBackend('run');
   if (inspected.installState !== 'ready') throw new Error(inspected.installMessage ?? 'The installation is not ready for Xodus run.');
-  const locale = supportedGameLocale(game.locale ?? '', await gameLocales(game));
-  const titleId = await gameTitleId(game);
+  const locale = supportedGameLocale(game.locale ?? '');
+  const titleId = await gameTitleId(game).catch(() => undefined);
   const wine = selectedWinePath(store.settings.winePath, store.settings.runtimeRoot, runtime.current.winePath);
   if (!wine) throw new Error('Select a Wine / Proton binary in Settings.');
   try { await fs.access(wine, constants.X_OK); }
@@ -932,9 +930,9 @@ async function prepareGameLaunch(id: string): Promise<void> {
     });
     if (contentRoots.length) environment.XODUS_CONTENT_ROOTS = [environment.XODUS_CONTENT_ROOTS, ...contentRoots.map(root => 'Z:' + root.replaceAll('/', '\\'))].filter(Boolean).join(';');
     if (locale) {
-      addGameLog(`Selected package language: ${locale}.`);
-      await syncPrefixUserLocale(wineCommand, protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, locale, environment, addGameLog);
+      addGameLog(`Selected game language: ${locale}.`);
     }
+    await syncPrefixUserLocale(wineCommand, protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, locale, environment, addGameLog);
     await syncUnrealCultureGameIni(protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, game.path, titleId, locale, addGameLog);
     if (cloudRuntime) {
       serviceSession = await startXodusService(binary, app.getPath('userData'), addGameLog);
@@ -1397,7 +1395,7 @@ function registerIpc(): void {
     if (typeof patch.locale === 'string') {
       const game = store.games.find((entry) => entry.id === id);
       if (!game) throw new Error('Game not found.');
-      allowed.locale = supportedGameLocale(patch.locale, await gameLocales(game)) ?? '';
+      allowed.locale = supportedGameLocale(patch.locale) ?? '';
     }
     const game = await store.patchGame(id, allowed);
     emitSnapshot();

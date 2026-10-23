@@ -18,6 +18,7 @@ import { GamepadNavigation } from './GamepadNavigation';
 import { ConfirmationProvider, useConfirmation } from './Confirmation';
 import { GameRemovalContents } from './GameRemovalContents';
 import { GameDetails } from './GameDetails';
+import { GameLanguage } from './GameLanguage';
 import { DownloadCancelDialog } from './DownloadCancelDialog';
 import { KeyringSetup } from './KeyringSetup';
 import { DiagnosticReportButton } from './DiagnosticReport';
@@ -580,6 +581,7 @@ export function LibraryPage({ data, toast, filters, onFiltersChange, selection }
   const [editLocale, setEditLocale] = useState('');
   const [editTools, setEditTools] = useState<GameLaunchTools>({ ...defaultLaunchTools });
   const [localeOptions, setLocaleOptions] = useState<string[]>([]);
+  const localeRequest = useRef(0);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [diagnosticLog, setDiagnosticLog] = useState<{ log: DiagnosticLog; operationId: string }>();
   const [contentGameId, setContentGameId] = useState<string>();
@@ -635,7 +637,10 @@ export function LibraryPage({ data, toast, filters, onFiltersChange, selection }
     setEditLocale(game.locale ?? '');
     setEditTools({ ...defaultLaunchTools, ...game.launchTools });
     setLocaleOptions([]);
-    if (kind === 'settings') void window.launcher.getGameLocales(game.id).then(setLocaleOptions).catch((error) => toast({ kind: 'error', message: errorMessage(error) }));
+    const request = ++localeRequest.current;
+    if (kind === 'settings') void window.launcher.getGameLocales(game.id).then(locales => {
+      if (request === localeRequest.current) setLocaleOptions(locales);
+    }).catch((error) => { if (request === localeRequest.current) toast({ kind: 'error', message: errorMessage(error) }); });
     setDialogGame({ id: game.id, kind });
   }
 
@@ -751,8 +756,8 @@ export function LibraryPage({ data, toast, filters, onFiltersChange, selection }
       {dialogGame.kind === 'remove' ? <GameRemovalContents game={modalGame} busy={dialogBusy} close={() => setDialogGame(undefined)} remove={mode => { void removeGame(mode); }} /> : <form onSubmit={saveGameSettings}>
         <h2>Game settings</h2>
         <label>Display name<input required value={editTitle} onChange={(event) => setEditTitle(event.target.value)} /></label>
-        <label>Game language<select value={editLocale} onChange={(event) => setEditLocale(event.target.value)}><option value="">System default</option>{localeOptions.map((locale) => <option key={locale} value={locale}>{locale}</option>)}{editLocale && !localeOptions.some((locale) => locale.toLowerCase() === editLocale.toLowerCase()) ? <option value={editLocale}>{editLocale}</option> : null}</select></label>
-        <p>Available languages come from the game manifest. All games use the active Xodus Runtime.</p>
+        <GameLanguage value={editLocale} locales={localeOptions} onChange={setEditLocale} />
+        <p>All games use the active runtime.</p>
         <GameLaunchToolFields value={editTools} change={setEditTools} />
         <div className="dialog-actions"><button type="button" className="secondary" disabled={dialogBusy} data-gamepad-cancel onClick={() => setDialogGame(undefined)}>Cancel</button><button className="primary" disabled={dialogBusy || !editTitle.trim()}><Check />Save</button></div>
       </form>}

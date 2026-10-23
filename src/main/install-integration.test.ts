@@ -30,6 +30,7 @@ const h = vi.hoisted(() => ({
   discoverySupported: false,
   libraryReads: 0,
   launchEnvironments: [] as NodeJS.ProcessEnv[],
+  prefixLocales: [] as (string | undefined)[],
   planOverrides: new Map<string, any>(),
   libraryRows: [] as any[],
   accountReads: [] as ((result: { code: number; output: string }) => void)[],
@@ -72,7 +73,7 @@ vi.mock('./install-plan.js', async original => ({ ...await original<typeof impor
 }));
 vi.mock('./xodus-service.js', () => ({ cloudSaveRuntime: async () => false, unbridgedCloudSaveRuntime: async () => false,
   selectedWinePath: () => h.wine, storeContentRuntime: async () => h.contentSupported, storeDiscoveryRuntime: async () => h.discoverySupported, startXodusService: vi.fn() }));
-vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async () => {}, syncUnrealCultureGameIni: async () => {} }));
+vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async (_wine: string, _prefix: string, locale: string | undefined) => { h.prefixLocales.push(locale); }, syncUnrealCultureGameIni: async () => {} }));
 vi.mock('./game-wrapper.js', () => ({ prepareGameWrapper: async () => ({ command: h.wine, cleanup: async () => {} }) }));
 vi.mock('./process.js', () => ({
   run: async (_command: string, args: string[]) => ({ code: 0, output: args[0] === 'account' ? JSON.stringify({ stored: true, username: 'sample@example.test' }) : '' }),
@@ -374,6 +375,41 @@ it('gates runtime DLC hints, clears inherited foreign hints and still launches a
   }finally{
     discover.mockRestore();h.discoverySupported=false;h.blockDisplay.mockClear();h.releaseDisplay.mockClear();
     if(old===undefined)delete process.env.NEXUS_RELATED_PRODUCT_IDS;else process.env.NEXUS_RELATED_PRODUCT_IDS=old;
+  }
+});
+
+it('saves and launches locale overrides without catalog or exhaustive manifest languages, including System default reset', async () => {
+  const manifest = path.join(h.root, 'installed-game/MicrosoftGame.config');
+  const before = await fs.readFile(manifest, 'utf8');
+  const reads = h.libraryReads, fetcher = globalThis.fetch;
+  globalThis.fetch = async () => { throw Error('Language settings must work offline'); };
+  const oldPackage = process.env.XODUS_PACKAGE_LOCALE, oldWine = process.env.WINEUSERLOCALE;
+  process.env.XODUS_PACKAGE_LOCALE = 'fr-FR'; process.env.WINEUSERLOCALE = 'fr-FR';
+  try {
+    await fs.rename(manifest, path.join(h.root, 'installed-game/MicrosoftGame.Config'));
+    expect(await ipc('game-locales', 'sample')).toEqual([]);
+    for (const [selection, expected] of [['pl-PL', 'pl-PL'], ['de', 'de-DE'], ['pt-PT', 'pt-PT'], ['', undefined]] as const) {
+      const game = await ipc('update-game', 'sample', { locale: selection });
+      expect(game.locale).toBe(selection);
+      await ipc('launch-game', 'sample'); expect(snapshot().gameOperation.status).toBe('running');
+      expect(h.prefixLocales.at(-1)).toBe(selection || undefined);
+      const env = h.launchEnvironments.at(-1)!;
+      expect(env.WINEUSERLOCALE).toBe(expected);
+      expect(env.XODUS_PACKAGE_LOCALE).toBe(selection || undefined);
+      if (selection === 'de') expect(env.LANG).toBe('de_DE.UTF-8');
+      expect(h.libraryReads).toBe(reads);
+      h.game!.finish(); await vi.waitFor(() => expect(snapshot().gameOperation.status).toBe('complete'));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    await expect(ipc('update-game', 'sample', { locale: 'de\nUNSAFE=value' })).rejects.toThrow();
+    expect(snapshot().games.find((game: any) => game.id === 'sample').locale).toBe('');
+    expect(await fs.readFile(path.join(h.root, 'installed-game/MicrosoftGame.Config'), 'utf8')).toBe(before);
+  } finally {
+    await fs.rename(path.join(h.root, 'installed-game/MicrosoftGame.Config'), manifest);
+    globalThis.fetch = fetcher;
+    if (oldPackage === undefined) delete process.env.XODUS_PACKAGE_LOCALE; else process.env.XODUS_PACKAGE_LOCALE = oldPackage;
+    if (oldWine === undefined) delete process.env.WINEUSERLOCALE; else process.env.WINEUSERLOCALE = oldWine;
+    h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
   }
 });
 
