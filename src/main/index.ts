@@ -50,7 +50,7 @@ import { startAuthTransport } from './auth-transport.js';
 import { authViewFactory } from './auth-window.js';
 import { browserAuthViewFactory } from './auth-browser.js';
 import { fallbackAuthViewFactory } from './auth-fallback.js';
-import { installSelection, readInstallPlan } from './install-plan.js';
+import { contentParentForChoice, InstallPlans, installSelection, readInstallPlan } from './install-plan.js';
 import { adoptLauncherFonts } from './launcher-fonts.js';
 import { externalLauncherEnvironment } from './launcher-environment.js';
 import { openDesktopTarget } from './desktop-open.js';
@@ -102,6 +102,7 @@ const catalog = new CatalogService();
 const gameActivities = new GameActivities();
 const gameAchievements = new GameAchievementsReader();
 const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market));
+const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
 const keyringSupport = new KeyringSupport(process.env, undefined, process.platform, undefined, {
@@ -485,7 +486,10 @@ async function gameContent(id: string) {
 async function installGameContent(id: string, productId: string): Promise<string> {
   ensureIdle();
   preparingContent = true;
-  try {
+  try { return await prepareContentInstall(id, productId); }
+  finally { preparingContent = false; preparingInstall = false; }
+}
+async function prepareContentInstall(id: string, productId: string, selectedContentId?: string): Promise<string> {
     const manager = contentManager();
     const { plan, packages } = await gameContent(id);
     if (shutdownStarted) throw Error('The launcher is closing.');
@@ -494,13 +498,13 @@ async function installGameContent(id: string, productId: string): Promise<string
     const item = plan.items.find(item => item.productId === productId);
     const pkg = packages.find(pkg => pkg.productId === productId);
     if (!game || !item || (!item.access && item.status !== 'verify') || !pkg || !['available', 'installed', 'verify'].includes(item.status)) throw Error('No supported content package with a verified license or active source offer was found.');
+    if (selectedContentId && pkg.contentId !== selectedContentId) throw Error('The add-on package changed. Check content again.');
     // Downloads use the existing genuine license-checked backend, not catalog URLs.
     requireBackend('streaming');
     if (await backend.externalDownloadRunning()) throw Error('Another Xodus download is running.');
     const destination = await manager.prepare(game, pkg, currentMarket());
     preparingInstall = true;
     return await prepareInstall({ productId, title: `${game.title}: ${item.title}`, destination }, undefined, { game, pkg, manager });
-  } finally { preparingContent = false; preparingInstall = false; }
 }
 
 async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }): Promise<string> {
@@ -511,13 +515,14 @@ async function prepareInstall(request: InstallRequest, updateGame?: Game, conten
   if (!content) {
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings before installing games.');
     if (request.selectionMarket !== undefined && request.selectionMarket !== market) throw Error('Store market changed. Choose the installation package again.');
-    if (request.selectedContentId !== undefined) {
-      if (request.selectionMarket !== market || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(request.selectedContentId)) throw Error('Invalid installation package selection.');
-      // Streaming re-resolves membership before license/download. Do not make
-      // a redundant third catalog round trip here after the dialog preflight.
-      selectedContentId = request.selectedContentId;
-    } else selectedContentId = installSelection(await readInstallPlan(binary, productId, market));
+    if (request.selectedContentId !== undefined && request.selectionMarket !== market) throw Error('Invalid installation package selection.');
+    const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
+    selectedContentId = installSelection(plan, request.selectedContentId);
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try installing again.');
+    const choice = plan.choices.find(choice => choice.supported && choice.contentId === selectedContentId)!;
+    if (updateGame && choice.kind === 'Durable') throw Error('An add-on cannot replace the base game. Use Manage content.');
+    const parent = contentParentForChoice(choice, store.games);
+    if (parent) return prepareContentInstall(parent, choice.productId, selectedContentId);
   }
   const activeTasks = store.downloads.filter(task => ['running', 'queued', 'paused'].includes(task.status));
   if (activeTasks.length >= 100) throw Error('The install queue is full. Cancel an installation before adding another.');
@@ -1315,7 +1320,7 @@ function registerIpc(): void {
     const binary = requireBackend('streaming');
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings to choose installation packages.');
     const productId = safeProductId(raw), market = currentMarket();
-    const plan = await readInstallPlan(binary, productId, market);
+    const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try again.');
     return plan;
   });

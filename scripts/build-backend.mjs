@@ -66,6 +66,7 @@ for (const name of ['account', 'login', 'logout', 'download', 'streaming', 'run'
   if (!new RegExp(`^\\s{2}${name}\\s{2,}`, 'm').test(help)) throw Error(`Backend lacks ${name}`);
 }
 if (!command(cli, ['run', '--help'], true).includes('--materialize-chain')) throw Error('Launch-chain support missing');
+if (!command(cli, ['resolve-package', '--help'], true).includes('--include-dlc')) throw Error('Managed DLC selection capability missing');
 const streamingHelp = command(cli, ['streaming', '--help'], true);
 for (const flag of ['--progress-json', '--control-stdin', '--selected-content-id', '--download-limit-kib']) {
   if (!streamingHelp.includes(flag)) throw Error(`Structured download capability missing: ${flag}`);

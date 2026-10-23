@@ -341,3 +341,17 @@ test('corresponding-source archive preserves nested target source directories', 
     assert.match(build, /copyFile\(path.join\(root, 'scripts\/backend-source-archive.mjs'\)/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+test('Durable package selection is opt-in, parent-bound and preserves legacy automatic game downloads',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(p=>p.file==='xodus-durable-content.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  for(const expected of ['include_dlc: bool','without_durable_selection','parentProductId','mainPackageFamilyName',
+    'durable_pc_package_requires_explicit_selection_and_verified_parent_metadata',
+    'durable_missing_foreign_or_ambiguous_parent_and_non_pc_formats_stay_unsupported'])assert.ok(patch.includes(expected),expected);
+  const files=[...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match=>match[1]).sort();
+  assert.deepEqual(files,['crates/xodus-cli/src/commands/streaming.rs','crates/xodus-cli/src/main.rs','crates/xodus-cli/src/package_plan.rs']);
+  assert.doesNotMatch(patch,/^[+-].*(?:ensure_device|init_secrets|\.get_packages|\.get_license|\.save_|\.remove_)/m);
+  const main=await fs.readFile('src/main/index.ts','utf8');
+  assert.ok(main.includes('contentParentForChoice(choice, store.games)'));assert.ok(main.includes("if (updateGame && choice.kind === 'Durable')"));
+  const build=await fs.readFile('scripts/build-backend.mjs','utf8');assert.ok(build.includes("['resolve-package', '--help']"));
+});

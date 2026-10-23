@@ -11,7 +11,7 @@ import { nexusRuntimeUpdateAvailable, runtimeDisplay } from '../shared/runtime-d
 import { subscriptionBadge } from '../shared/subscription';
 import { defaultLaunchTools, normalizeLaunchTools } from '../shared/launch-tools';
 import type { GameLaunchTools } from '../shared/types';
-import { PackageInstallProvider, usePackageInstall } from './PackageInstall';
+import { catalogInstallRequest, PackageInstallProvider, usePackageInstall } from './PackageInstall';
 import { defaultLibraryFilters, loadLibraryFilters, saveLibraryFilters, libraryProductMatchesPlayState, type LibraryFilters } from './library-preferences';
 import { InstallQueueShortcut } from './InstallQueueShortcut';
 import { GamepadNavigation } from './GamepadNavigation';
@@ -295,7 +295,7 @@ function StorePage({ data, toast, go, initialQuery }: { data: AppSnapshot; toast
   async function install(product: CatalogProduct, target = installDestination(product)) {
     setBusy(product.productId);
     try {
-      if (!await startPackageInstall({ productId: product.installProductId ?? product.productId, title: product.title, destination: target })) return;
+      if (!await startPackageInstall(catalogInstallRequest(product, target))) return;
       toast({ kind: 'success', message: `Xodus is checking the license and installing ${product.title}.` });
       go('downloads');
     } catch (error) { toast({ kind: 'error', message: errorMessage(error) }); }
@@ -469,8 +469,7 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
     setInstalling(product.productId);
     try {
       const folder = product.title.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 80) || product.productId;
-      if (!await startPackageInstall({ productId: product.productId, title: product.title,
-        destination: `${data.settings.installRoot.replace(/\/+$/, '')}/${folder}` })) return;
+      if (!await startPackageInstall(catalogInstallRequest(product, `${data.settings.installRoot.replace(/\/+$/, '')}/${folder}`))) return;
       toast({ kind: 'success', message: `${product.title} added to Install Queue.` });
     } catch (error) { toast({ kind: 'error', message: errorMessage(error) }); }
     finally { setInstalling(undefined); }

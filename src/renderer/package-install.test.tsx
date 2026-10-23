@@ -1,7 +1,12 @@
 import { expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { InstallPlan } from '../shared/types';
-import { PackageDialog } from './PackageInstall';
+import { catalogInstallRequest, PackageDialog } from './PackageInstall';
+
+it('preserves the requested edition rather than silently replacing it with the base-package offer',()=>{
+  expect(catalogInstallRequest({productId:'9AAAAAAAAAAA',installProductId:'9BBBBBBBBBBB',title:'Deluxe edition'},'/synthetic/deluxe'))
+    .toEqual({productId:'9AAAAAAAAAAA',title:'Deluxe edition',destination:'/synthetic/deluxe'});
+});
 
 it('shows verified package names, IDs, platform and disabled unsupported choices without auto-selection', () => {
   const plan: InstallPlan = { schema: 1, rootProductId: '9AAAAAAAAAAA', market: 'US', status: 'choice', choices: [

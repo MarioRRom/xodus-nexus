@@ -16,6 +16,7 @@ export interface BackendCapabilities {
   streamingControls?: boolean;
   streamingBandwidthLimit?: boolean;
   packageSelection?: boolean;
+  contentPackageSelection?: boolean;
   run: boolean;
   version?: string;
 }
@@ -244,6 +245,8 @@ export interface InstallChoice {
   packageFormat: string;
   kind: string;
   supported: boolean;
+  parentProductId?: string;
+  mainPackageFamilyName?: string;
 }
 
 export interface InstallPlan {
