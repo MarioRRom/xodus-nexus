@@ -61,7 +61,7 @@ function resolveEntitlement(productId: string, entries: Map<string, Entitlement>
     visited.add(current);
     subscription ||= plans.has(current);
     const item = entries.get(current);
-    if (!item) return depth ? conditional ? { kind: 'other', reason: 'access-conditional' }
+    if (!item) return depth ? conditional ? { kind: 'owned', reason: 'access-conditional' }
       : subscription ? { kind: 'gamepass' } : { kind: 'other', reason: 'access-unresolved' } : {};
     // Only the backend's explicit boolean provenance permits conditional access.
     // Legacy/unknown special flags remain excluded, never assumed to be owned.
@@ -69,8 +69,10 @@ function resolveEntitlement(productId: string, entries: Map<string, Entitlement>
     if (item.status !== 'Active' || item.isTrial || item.sharingSource !== 'None' || Date.parse(item.endDate) <= now)
       return depth ? { reason: 'access-parent-unavailable' } : {};
     conditional ||= item.isPositron === true;
+    // Owned is a library category, not a promise that a license cannot expire
+    // or be revoked. Explicit disc-derived access belongs with purchased games.
     if (!item.satisfiedByProductId) return current === productId && plans.has(current) ? {}
-      : conditional ? { kind: 'other', reason: 'access-conditional' } : { kind: subscription ? 'gamepass' : 'owned' };
+      : conditional ? { kind: 'owned', reason: 'access-conditional' } : { kind: subscription ? 'gamepass' : 'owned' };
     current = item.satisfiedByProductId;
   }
   return { reason: 'access-depth' };

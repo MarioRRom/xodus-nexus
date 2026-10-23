@@ -11,17 +11,18 @@ const row=(productId=A, extra={})=>({productId,status:'Active',isTrial:false,sha
 const output=(entries=[row()],account='one@example.test',market='US')=>JSON.stringify({schema:1,account,market,checkedAt:new Date().toISOString(),entitlements:entries});
 const product=(productId:string):CatalogProduct=>({productId,title:productId,description:'',categories:[],installability:'supported',supportNote:''});
 
-it('shows explicit Positron access in All and Other without turning it into permanent ownership', async () => {
+it('shows explicit disc-to-digital access in All and Owned without an unknown-source warning', async () => {
   const reader = vi.fn(async () => output([row(A, { special: true, isPositron: true }), row(B)]));
   const library = new AccountLibrary(async ids => ids.map(product), reader);
   library.select('one@example.test', '/not-executed', 'US');
   const all = await library.get('all');
-  expect(all.products.find(p => p.productId === A)).toMatchObject({ access: 'other' });
+  expect(all.products.find(p => p.productId === A)).toMatchObject({ access: 'owned' });
   expect(all.excludedEntitlements).toBe(0);
-  expect((await library.get('other')).products.map(p => p.productId)).toEqual([A]);
-  expect((await library.get('owned')).products.map(p => p.productId)).toEqual([B]);
+  expect(all.unclassifiedEntitlements).toBe(0);
+  expect((await library.get('other')).products).toEqual([]);
+  expect((await library.get('owned')).products.map(p => p.productId)).toEqual([A, B]);
   expect((await library.get('gamepass')).products).toEqual([]);
-  expect(library.peekAccess()).toEqual({ [A]: 'other', [B]: 'owned' });
+  expect(library.peekAccess()).toEqual({ [A]: 'owned', [B]: 'owned' });
   expect(reader).toHaveBeenCalledTimes(1);
 });
 
@@ -29,9 +30,10 @@ it('propagates conditional access through valid parents without bypassing chain 
   const conditional = { special: true, isPositron: true };
   const kind = (rows: ReturnType<typeof row>[]) => entitlementKind(A, parseEntitlements(output(rows), 'one@example.test', 'US').entries);
   expect(kind([row(A), row(B, conditional)])).toBe('owned');
-  expect(kind([row(A, { satisfiedByProductId: B }), row(B, conditional)])).toBe('other');
-  expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B)])).toBe('other');
-  expect(kind([row(A, { ...conditional, satisfiedByProductId: 'CFQ7TTC0KGQ8' })])).toBe('other');
+  expect(kind([row(A, { satisfiedByProductId: B }), row(B, conditional)])).toBe('owned');
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: B }), row(B)])).toBe('owned');
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: 'CFQ7TTC0KGQ8' })])).toBe('owned');
+  expect(kind([row(A, { ...conditional, satisfiedByProductId: B })])).toBe('owned');
   for (const invalid of [{ status: 'Revoked' }, { isTrial: true }, { sharingSource: 'Family' }, { endDate: '2000-01-01T00:00:00Z' }]) {
     expect(kind([row(A, { ...conditional, ...invalid })])).toBeUndefined();
     expect(kind([row(A, { satisfiedByProductId: B }), row(B, { ...conditional, ...invalid })])).toBeUndefined();
@@ -76,8 +78,10 @@ it('rechecks conditional access after expiry, revocation or account change and p
   const first = await library.get('all');
   expect(first.products).toHaveLength(60);
   expect((await library.get('all', first.cursor)).products).toHaveLength(1);
-  expect((await library.get('other')).products).toHaveLength(60);
-  expect((await library.get('owned')).products).toEqual([]);
+  expect((await library.get('other')).products).toEqual([]);
+  const owned = await library.get('owned');
+  expect(owned.products).toHaveLength(60);
+  expect((await library.get('owned', owned.cursor)).products).toHaveLength(1);
   status = 'Revoked';
   expect((await library.get('all', undefined, true)).products).toEqual([]);
   expect(library.peekAccess()).toEqual({});
@@ -105,9 +109,10 @@ it('keeps conditional PC games visible through the real catalog path without inv
   library.select('one@example.test', '/not-executed', 'US');
   const products = (await library.get('all')).products;
   expect(products).toHaveLength(2);
-  expect(products.find(p => p.productId === A)).toMatchObject({ access: 'other', installability: 'supported' });
-  expect(products.find(p => p.productId === B)).toMatchObject({ access: 'other', installability: 'unsupported' });
-  expect((await library.get('owned')).products).toEqual([]);
+  expect(products.find(p => p.productId === A)).toMatchObject({ access: 'owned', installability: 'supported' });
+  expect(products.find(p => p.productId === B)).toMatchObject({ access: 'owned', installability: 'unsupported' });
+  expect((await library.get('owned')).products).toHaveLength(2);
+  expect((await library.get('other')).products).toEqual([]);
 });
 
 it('provides account-bound fresh in-memory discovery hints without starting reads or reusing stale rights', async () => {
