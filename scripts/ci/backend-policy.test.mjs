@@ -269,6 +269,23 @@ test('backend build runs account-free credential persistence regressions', async
     lock.patches.findIndex(p => p.file === 'xodus-keyring-encoding.patch'));
 });
 
+test('authenticated account metadata remains bound, additive and covered by backend regressions', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  assert.equal(lock.patches.at(-1).file, 'xodus-authenticated-account-metadata.patch');
+  const patch = await fs.readFile('assets/xodus-authenticated-account-metadata.patch', 'utf8');
+  for (const expected of ['get_user_sts_session', 'self.user_session()?', 'bound_ids',
+    'credential_account_metadata_snapshot_is_atomic_and_logout_removes_it',
+    'credential_account_metadata_never_pairs_different_sessions_under_concurrent_reads',
+    'account_metadata_uses_real_session_ids_and_rejects_mixed_accounts',
+    'account_metadata_rejects_placeholder_malformed_and_empty_ids',
+    'account_metadata_xml_is_additive_and_omitted_for_unbound_sessions',
+    'skip_serializing_if = "Option::is_none"']) assert.ok(patch.includes(expected), expected);
+  assert.doesNotMatch(patch, /diff --git a\/.*(?:login\.rs|license\.rs|streaming\.rs|run\.rs)/);
+  assert.doesNotMatch(patch, /^\+.*(?:println!|tracing::).*puid/m);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.ok(build.includes("'-p', 'xodus-service', 'account_metadata_'"));
+});
+
 test('GNOME textual keyring regression uses only in-memory synthetic data', { skip: process.platform !== 'linux' }, () => {
   execFileSync('python3', ['scripts/keyring-textual-roundtrip.test.py'], { stdio: 'pipe' });
 });

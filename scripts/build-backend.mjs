@@ -52,6 +52,7 @@ command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'c
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'ticket_diagnostic_']);
 command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'store_']);
+command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'account_metadata_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'msixvc', 'streaming_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'msixvc', 'streaming::tests']);
 // Aggregate HTTP probes mutate the process-wide limiter, so run them serially.
