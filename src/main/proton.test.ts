@@ -498,6 +498,11 @@ describe('syncUnrealCultureGameIni', () => {
     expect(removed).not.toContain('Culture=');
     expect(removed).not.toContain('[Internationalization]');
     expect(lines.join('\n')).toContain('Removed the pinned Unreal text language');
+    expect((await stat(gameIni)).mode & 0o777).toBe(0o644);
+    await writeFile(gameIni, '[Internationalization]\nCulture=fr-FR\n');
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', undefined, () => {});
+    expect(await readFile(gameIni, 'utf8')).toBe('[Internationalization]\nCulture=fr-FR\n');
+    expect((await stat(gameIni)).mode & 0o777).toBe(0o644);
   });
 
   it('never touches a manually authored culture line', async () => {
@@ -511,6 +516,17 @@ describe('syncUnrealCultureGameIni', () => {
     expect(await readFile(gameIni, 'utf8')).toBe(manual);
     expect((await stat(gameIni)).mode & 0o222).not.toBe(0);
     expect(lines.join('\n')).toContain('manually configured');
+  });
+
+  it('releases only its managed pin and preserves other settings on System default', async () => {
+    const { prefix, configDirectory, install } = await makePrefix('reset');
+    const gameIni = path.join(configDirectory, 'Game.ini');
+    await writeFile(gameIni, '[Other]\nValue=1\n');
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', 'en', () => {});
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', undefined, () => {});
+    expect(await readFile(gameIni, 'utf8')).toContain('[Other]\nValue=1');
+    expect(await readFile(gameIni, 'utf8')).not.toContain('Culture=');
+    expect((await stat(gameIni)).mode & 0o222).not.toBe(0);
   });
 
   it('does nothing without a title id, for non-Unreal installs, or without a config directory', async () => {

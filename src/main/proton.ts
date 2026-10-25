@@ -327,7 +327,9 @@ export async function syncUnrealCultureGameIni(
           ? `Pinned the Unreal text language to ${locale} via ${path.join(product, 'WinGDK', titleId, 'Saved', 'Config', 'WinGDK', 'Game.ini')}.`
           : `Removed the pinned Unreal text language from ${path.join(product, 'WinGDK', titleId, 'Saved', 'Config', 'WinGDK', 'Game.ini')}.`);
       }
-      if (plan.managed) await fs.chmod(gameIni, 0o444).catch(() => undefined);
+      // Clearing our pin must also release our read-only protection so the
+      // game can save its own language choice again.
+      if (plan.managed && locale !== undefined) await fs.chmod(gameIni, 0o444).catch(() => undefined);
     }
   }
 }
