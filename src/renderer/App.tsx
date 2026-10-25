@@ -103,7 +103,6 @@ export function TopStatus({ data, go, openFriends }: { data: AppSnapshot; go: (p
   ].filter(Boolean);
   const updateTitle = [restart ? 'Restart to finish launcher update.' : '', updates.length ? `Available updates: ${updates.join(', ')}` : ''].filter(Boolean).join(' ');
   return <div className="top-status">
-    {openFriends?<button title="Xbox friends and chat" aria-label="Xbox friends and chat" onClick={openFriends}><UsersRound /></button>:null}
     {updates.length || restart ? <button className="update-notice" title={updateTitle} aria-label={updateTitle} onClick={() => go('settings')}><ArrowDownToLine /><strong>{restart ? 'Restart available' : 'Update available'}</strong></button> : null}
     <StatusDot tone={data.backend.available ? 'green' : 'red'} /><span>{data.backend.available ? 'Xodus ready' : 'Backend offline'}</span><button title="Settings" onClick={() => go('settings')}><Settings2 /></button>
   </div>;
@@ -1074,7 +1073,10 @@ export default function App() {
       <div className="page-scroll">{page === 'home' ? <HomePage data={data} go={setPage} action={action} /> : null}{page === 'store' ? <StorePage data={data} toast={setToast} go={setPage} initialQuery={submittedSearch} /> : null}{page === 'library' ? <LibraryPage data={data} toast={setToast} filters={libraryFilters} onFiltersChange={changeLibraryFilters} selection={librarySelection} /> : null}{page === 'downloads' ? <DownloadsPage data={data} toast={setToast} /> : null}{page === 'settings' ? <SettingsPage data={data} toast={setToast} /> : null}</div>
     </section>
     {toast ? <div className={`toast ${toast.kind}`}>{toast.kind === 'success' ? <Check /> : toast.kind === 'error' ? <CircleAlert /> : <Terminal />}<span>{toast.message}</span><button onClick={() => setToast(undefined)}><X /></button></div> : null}
-    {friendsOpen?<Friends key={JSON.stringify([data.auth.username,data.backend.binaryPath])} data={data} close={()=>setFriendsOpen(false)} />:null}
+    <div className="friends-dock">
+      {friendsOpen?<Friends key={JSON.stringify([data.auth.username,data.backend.binaryPath])} data={data} close={()=>setFriendsOpen(false)} docked />:null}
+      <button className="friends-dock-toggle" aria-label="Xbox friends and chat" aria-expanded={friendsOpen} onClick={()=>setFriendsOpen(value=>!value)}><UsersRound /><span><strong>Friends</strong><small>{data.social?.incoming.length?`${data.social.incoming.length} game invitation${data.social.incoming.length===1?'':'s'}`:'Chat and game invitations'}</small></span><ChevronRight className={friendsOpen?'expanded':''} /></button>
+    </div>
   </div><GamepadNavigation back={() => friendsOpen?setFriendsOpen(false):setPage('home')} page={delta => { if(friendsOpen)return;setPage(current => {
     const pages: Page[] = ['home', 'library', 'store'];
     const index = pages.indexOf(current);

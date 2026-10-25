@@ -102,3 +102,15 @@ export class XboxSocial {
     this.jobs.set(key,{controller,result});return result;
   }
 }
+
+/** Closing one surface must not cancel a message being sent in another. */
+export class XboxSocialSessions {
+  epoch=0;
+  private sessions=new Map<number,XboxSocial>();
+  constructor(private identity:()=>Identity|undefined){}
+  client(id:number):XboxSocial{let value=this.sessions.get(id);if(!value){value=new XboxSocial(this.identity);this.sessions.set(id,value);}return value;}
+  closeClient(id:number):void{this.sessions.get(id)?.close();}
+  close():void{this.epoch++;for(const session of this.sessions.values())session.close();}
+  get busy():boolean{return [...this.sessions.values()].some(value=>value.busy);}
+  async settled():Promise<void>{await Promise.all([...this.sessions.values()].map(value=>value.settled()));}
+}

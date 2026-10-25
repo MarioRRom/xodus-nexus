@@ -1,5 +1,6 @@
 .friends-dialog { width:min(880px,94vw); max-height:90vh; display:flex; flex-direction:column; overflow:auto; background:var(--panel,#202428); border:1px solid #485058; border-radius:8px; padding:22px; box-shadow:0 20px 80px #0009; }
 .friends-dialog>header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.friends-dialog>header,.friends-dialog>.friends-tools,.friends-dialog>.friends-invitations,.friends-dialog>.friends-columns,.friends-dialog>.friends-limitation { flex-shrink:0; }
 .friends-dialog>header h2 { margin:0; }
 .friends-dialog button { display:inline-flex; gap:8px; align-items:center; border:1px solid #51575f; border-radius:4px; padding:8px 12px; background:#30353b; color:var(--text,#f1f2f4); font:inherit; font-size:12px; cursor:pointer; }
 .friends-dialog button:hover:not(:disabled) { background:#41474e; }
@@ -24,4 +25,24 @@
 .friends-chat form button { background:#348b32; border-color:#348b32; }
 .friends-limitation { font-size:12px; margin-bottom:0; }
 .friends-error { color:#f1bf85; }
+.friends-invitations { max-height:180px; overflow:auto; margin-top:12px; }
+.friends-invitations article { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px; background:#2a3528; border:1px solid #53624c; border-radius:5px; margin-bottom:8px; }
+.friends-invitations article>div { flex:1; min-width:180px; display:flex; flex-direction:column; gap:4px; }
+.friends-dock { position:fixed; right:24px; bottom:0; z-index:60; width:320px; }
+.friends-dock-toggle { display:flex; align-items:center; gap:12px; width:100%; min-height:60px; padding:12px 16px; border:1px solid #44494e; border-bottom:0; border-radius:8px 8px 0 0; background:#25292e; color:#f4f4f4; text-align:left; box-shadow:0 -4px 20px #0003; cursor:pointer; }
+.friends-dock-toggle>svg { width:20px; height:20px; flex-shrink:0; }
+.friends-dock-toggle>span { flex:1; display:flex; flex-direction:column; gap:4px; }
+.friends-dock-toggle small { color:#afb8c0; font-size:12px; }
+.friends-dock-toggle>svg:last-child { transform:rotate(-90deg); }
+.friends-dock-toggle>svg.expanded { transform:rotate(90deg); }
+.friends-docked { position:absolute; bottom:62px; right:0; }
+.friends-docked .friends-dialog { width:min(780px,calc(100vw - 48px)); max-height:calc(100vh - 100px); }
+.friends-overlay-content { width:100%; height:100vh; padding:8px; background:transparent; }
+.friends-overlay-content .friends-dialog { width:100%; height:100%; max-height:none; }
+.friends-overlay-content .friends-dialog>header { -webkit-app-region:drag; }
+.friends-overlay-content button,.friends-overlay-content textarea { -webkit-app-region:no-drag; }
+.friends-dialog>header>div { display:flex; gap:8px; }
+.friends-dialog>header>div>button { background:transparent; border:0; padding:6px; }
+html:has(.friends-overlay-content),body:has(.friends-overlay-content) { background:transparent; }
+@media(max-width:650px) { .friends-dock { right:12px; width:270px; } .friends-docked .friends-dialog { width:calc(100vw - 24px); padding:14px; } }
 @media(max-width:650px) { .friends-columns { grid-template-columns:1fr; } .friends-columns>aside { max-height:130px; border-right:0; } }

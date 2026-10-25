@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
 import { constants, createWriteStream, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,7 +18,7 @@ import { inspectGameDirectory, StateStore } from './store.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { CatalogService } from './catalog.js';
-import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
+import { cloudSaveRuntime, gameInviteRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
 import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION, versionAtLeast } from './vc-runtime.js';
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
@@ -60,7 +60,9 @@ import { gameSteamPortrait, nexusSteamArtwork } from './steam-artwork.js';
 import { addLiveSteamShortcut } from './steam-live.js';
 import { DownloadCompletionNotifications } from './download-notifications.js';
 import { KeyringSupport } from './keyring.js';
-import { XboxSocial } from './xbox-social.js';
+import { XboxSocialSessions } from './xbox-social.js';
+import { desktopOverlayOptions, SocialOverlayWindow } from './social-overlay.js';
+import { GameInviteBridge, combinedInviteState } from './game-invite-bridge.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
@@ -75,6 +77,24 @@ const downloadNotifications = new DownloadCompletionNotifications({
   },
 });
 let mainWindow: BrowserWindow | null = null;
+let socialWindow: BrowserWindow | undefined;
+const socialOverlay=new SocialOverlayWindow(async()=>{
+  const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const window=new BrowserWindow(desktopOverlayOptions(area,path.join(__dirname,'..','preload','index.cjs')));
+  socialWindow=window;
+  const socialId=window.webContents.id;
+  window.setAlwaysOnTop(true,'floating');
+  window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  window.webContents.on('will-navigate',event=>event.preventDefault());
+  window.webContents.on('will-attach-webview',event=>event.preventDefault());
+  window.on('closed',()=>{xboxSocial.closeClient(socialId);if(socialWindow===window)socialWindow=undefined;});
+  try{
+    if(process.env.VITE_DEV_SERVER_URL)await window.loadURL(process.env.VITE_DEV_SERVER_URL+'#social-overlay');
+    else await window.loadFile(path.join(__dirname,'..','..','dist','index.html'),{hash:'social-overlay'});
+    return window;
+  }catch{window.destroy();throw Error('The desktop overlay could not be loaded.');}
+},()=>{if(socialWindow&&!socialWindow.isDestroyed())xboxSocial.closeClient(socialWindow.webContents.id);});
 let store: StateStore;
 let backend: BackendManager;
 let backendDiagnostics: BackendDiagnostics;
@@ -89,6 +109,7 @@ const downloadLimitControls = new DownloadBandwidthControls();
 const installQueue = new InstallQueue(() => finishShortcutSession());
 const gameDisplay = new GameDisplayBlocker(powerSaveBlocker);
 const serviceSessions = new Map<string, XodusServiceSession>();
+const gameInviteBridges=new Map<string,GameInviteBridge>();
 const preparationControllers = new Map<string, AbortController>();
 let gameOperation: GameOperation | undefined;
 let gameRemovalInProgress = false;
@@ -107,7 +128,7 @@ const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProdu
 const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
-const xboxSocial = new XboxSocial(() => {
+const xboxSocial = new XboxSocialSessions(() => {
   const status = backend?.current;
   return !shutdownStarted && !authState.running && authState.stored === true && authState.username
     && status?.available && status.binaryPath && status.capabilities.commands.includes('social')
@@ -215,6 +236,7 @@ function snapshot(): AppSnapshot {
     gameUpdates: structuredClone(gameUpdates),
     downloadProgressSupported: Boolean(backend.current.capabilities.streamingProgressJson),
     gameOperation: gameOperation ? structuredClone(gameOperation) : undefined,
+    social: combinedInviteState(gameInviteBridges.values()),
   };
 }
 
@@ -271,6 +293,7 @@ function emitSnapshot(): void {
   if (snapshotTimer) clearTimeout(snapshotTimer);
   snapshotTimer = undefined;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('snapshot', snapshot());
+  if (socialWindow && !socialWindow.isDestroyed()) socialWindow.webContents.send('snapshot', snapshot());
 }
 
 function scheduleSnapshot(): void {
@@ -901,6 +924,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
   writeLaunchLog(`Wine: ${wine}`);
   emitSnapshot();
   let serviceSession: XodusServiceSession | undefined;
+  let inviteBridge: GameInviteBridge | undefined;
   let launchWrapper: GameWrapper | undefined;
   let releaseDisplay = () => {};
   try {
@@ -927,6 +951,8 @@ async function prepareGameLaunch(id: string): Promise<void> {
     // Never inherit another title's discovery list. Hints are scoped public
     // metadata, not licenses, and cannot make an optional lookup block Play.
     delete environment.NEXUS_RELATED_PRODUCT_IDS;
+    delete environment.NEXUS_INVITE_PORT;
+    delete environment.NEXUS_INVITE_KEY;
     if (await storeDiscoveryRuntime(wine)) {
       const related = await contentManager().relatedProducts(game, accountLibrary.peekAccess(), currentMarket()).catch(() => {
         addGameLog('Additional DLC discovery unavailable. Continuing with package-declared content.');
@@ -952,6 +978,17 @@ async function prepareGameLaunch(id: string): Promise<void> {
       environment.XODUS_BRIDGE_KEY = serviceSession.bridgeKey;
       environment.XODUS_SAVE_SYNC = 'auto';
       addGameLog('Xbox cloud save preview is enabled. Saves may download from and upload to the account cloud.');
+    }
+    if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&await gameInviteRuntime(wine)){
+      const account=authState.username,epoch=xboxSocial.epoch;
+      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch,emitSnapshot,()=>{void socialOverlay.show().catch(()=>{});},Date.now,sender=>{
+        if(!Notification.isSupported())return;
+        try{const notice=new Notification({title:'Game invitation',body:`${sender} invited you to ${game.title}. Open Friends to accept.`,urgency:'normal'});notice.on('click',()=>{void socialOverlay.show().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
+      });
+      try{
+        await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
+        environment.NEXUS_INVITE_PORT=String(inviteBridge.port);environment.NEXUS_INVITE_KEY=inviteBridge.key;
+      }catch{await inviteBridge.stop().catch(()=>{});inviteBridge=undefined;addGameLog('Optional game invitations are unavailable for this launch.');}
     }
     if (protonRunner) addGameLog(`Proton prefix: ${protonRunner.compatibilityDataPath}/pfx`);
     else await fs.mkdir(legacyPrefixRoot, { recursive: true });
@@ -994,6 +1031,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       try {
         operations.delete(operationId);
         gameProcesses.delete(operationId);
+        await inviteBridge?.stop().catch(()=>{});gameInviteBridges.delete(operationId);
         if (serviceSession) {
           await serviceSession.stop().catch((error) => addGameLog(`Account service cleanup failed: ${(error as Error).message}`));
           serviceSessions.delete(operationId);
@@ -1008,6 +1046,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     });
   } catch (error) {
     releaseDisplay();
+    await inviteBridge?.stop().catch(()=>{});gameInviteBridges.delete(operationId);
     await launchWrapper?.cleanup().catch(() => undefined);
     if (serviceSession) {
       await serviceSession.stop().catch(() => undefined);
@@ -1268,10 +1307,30 @@ function registerIpc(): void {
     emitSnapshot();
   });
   ipcMain.handle('account-refresh', () => refreshAccount());
-  ipcMain.handle('xbox-friends', () => xboxSocial.friends());
-  ipcMain.handle('xbox-conversation', (_event, xuid: unknown) => xboxSocial.conversation(xuid));
-  ipcMain.handle('xbox-send-message', (_event, xuid: unknown, text: unknown) => xboxSocial.send(xuid, text));
-  ipcMain.handle('xbox-social-close', () => xboxSocial.close());
+  const socialClient=(event:Electron.IpcMainInvokeEvent)=>{
+    if(event.sender!==mainWindow?.webContents&&event.sender!==socialWindow?.webContents)throw Error('Unknown social window.');
+    if(event.senderFrame!==event.sender.mainFrame)throw Error('Unknown social frame.');
+    return xboxSocial.client(event.sender.id);
+  };
+  ipcMain.handle('xbox-friends', event => socialClient(event).friends());
+  ipcMain.handle('xbox-conversation', (event, xuid: unknown) => socialClient(event).conversation(xuid));
+  ipcMain.handle('xbox-send-message', (event, xuid: unknown, text: unknown) => socialClient(event).send(xuid, text));
+  ipcMain.handle('xbox-social-close', event => socialClient(event).close());
+  ipcMain.handle('social-overlay-toggle', async event => {
+    socialClient(event);
+    if(!globalShortcut.isRegistered('Control+Shift+F10'))globalShortcut.register('Control+Shift+F10',()=>{void socialOverlay.toggle().catch(()=>{});});
+    await socialOverlay.toggle();
+  });
+  ipcMain.handle('social-overlay-close', event => {socialClient(event);socialOverlay.hide();});
+  const invitation=(event:Electron.IpcMainInvokeEvent,id:unknown)=>{
+    socialClient(event);if(typeof id!=='string'||id.length>160)throw Error('Invalid invitation.');
+    const bridge=[...gameInviteBridges.values()].find(value=>id.startsWith(value.id+':'));
+    if(!bridge)throw Error('The game is no longer running.');return {bridge,id};
+  };
+  ipcMain.handle('game-invite-choose',(event,id:unknown,xuid:unknown)=>{const value=invitation(event,id);value.bridge.choose(value.id,xuid);});
+  ipcMain.handle('game-invite-cancel',(event,id:unknown)=>{const value=invitation(event,id);value.bridge.cancel(value.id);});
+  ipcMain.handle('game-invite-accept',(event,id:unknown)=>{const value=invitation(event,id);value.bridge.accept(value.id);});
+  ipcMain.handle('game-invite-friend',(event,id:unknown,xuid:unknown)=>{socialClient(event);if(typeof id!=='string'||id.length>100)throw Error('Invalid game.');const bridge=gameInviteBridges.get(id);if(!bridge)throw Error('The game is no longer running.');bridge.invite(xuid);});
   ipcMain.handle('keyring-check', () => keyringSupport.check());
   ipcMain.handle('keyring-start', async () => {
     ensureIdle();
@@ -1692,6 +1751,7 @@ async function createWindow(): Promise<void> {
     if (windowState?.maximized) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
+  mainWindow.on('closed', () => { socialOverlay.dispose(); mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void openDesktopTarget(url, () => shell.openExternal(url))
       .catch(() => console.warn('Could not open the external browser.'));
@@ -1873,7 +1933,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !shortcutOnly) app.quit();
 });
 
-app.on('will-quit', () => gameDisplay.stop());
+app.on('will-quit', () => {socialOverlay.dispose();globalShortcut.unregisterAll();gameDisplay.stop();});
 
 app.on('before-quit', (event) => {
   xboxSocial.close();

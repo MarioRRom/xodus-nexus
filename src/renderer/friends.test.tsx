@@ -16,11 +16,17 @@ it('keeps chat, in-game presence, invitations and overlay capabilities separate'
   const data=demoSnapshot();data.auth.stored=true;data.auth.running=false;data.backend.available=true;data.backend.capabilities.commands.push('social');
   const html=renderToStaticMarkup(<Friends data={data} close={()=>{}} />);
   expect(html).toContain('Nothing is sent automatically');
-  expect(html).toContain('Game invitations and an in-game overlay are not available');
+  expect(html).toContain('Game invitations require a running game using a compatible Nexus runtime');
+  expect(html).toContain('may not appear over exclusive fullscreen or Steam Game Mode');
   expect(html).toContain('Chat does not change your in-game online status');
-  expect(html).not.toMatch(/Invite friend|Accept invite|Open overlay|<iframe|<webview/);
+  expect(html).not.toMatch(/Invitation sent\.|<iframe|<webview/);
 });
-it('adds an explicit Friends entry without replacing existing navigation or launching a game',()=>{
+it('keeps friends out of the top bar and preserves existing navigation',()=>{
   const html=renderToStaticMarkup(<TopStatus data={demoSnapshot()} go={()=>{}} openFriends={()=>{}} />);
-  expect(html).toContain('Xbox friends and chat');expect(html).toContain('Settings');
+  expect(html).not.toContain('Xbox friends and chat');expect(html).toContain('Settings');
+});
+it('supports a bottom-right dock and an independent desktop overlay surface',()=>{
+  const data=demoSnapshot();
+  expect(renderToStaticMarkup(<Friends data={data} docked close={()=>{}} />)).toContain('friends-docked');
+  expect(renderToStaticMarkup(<Friends data={data} overlay close={()=>{}} />)).toContain('friends-overlay-content');
 });

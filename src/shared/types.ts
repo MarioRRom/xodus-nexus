@@ -217,6 +217,7 @@ export interface KeyringStatus {
 }
 
 export interface AppSnapshot {
+  social?: import('./game-invites.js').GameInviteState;
   backend: BackendStatus;
   runtime: RuntimeStatus;
   games: Game[];
@@ -353,6 +354,12 @@ export interface AccountLibraryPage {
 }
 
 export interface LauncherApi {
+  inviteXboxFriend(gameId:string,xuid:string):Promise<void>;
+  chooseGameInviteRecipient(id: string, xuid: string): Promise<void>;
+  cancelGameInvite(id: string): Promise<void>;
+  acceptGameInvite(id: string): Promise<void>;
+  toggleSocialOverlay(): Promise<void>;
+  closeSocialOverlay(): Promise<void>;
   getXboxFriends(): Promise<import('./social.js').XboxFriend[]>;
   getXboxConversation(xuid: string): Promise<import('./social.js').XboxConversation>;
   sendXboxMessage(xuid: string, text: string): Promise<void>;

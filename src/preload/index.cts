@@ -6,6 +6,12 @@ import type { Game, InstallRequest, LauncherApi, Settings } from '../shared/type
 // preload stays a thin passthrough. Store pages always use the live
 // Microsoft Store catalog. No real credentials, tokens or account data.
 const api: LauncherApi = {
+  inviteXboxFriend:(gameId,xuid)=>ipcRenderer.invoke('game-invite-friend',gameId,xuid),
+  chooseGameInviteRecipient: (id,xuid) => ipcRenderer.invoke('game-invite-choose',id,xuid),
+  cancelGameInvite: id => ipcRenderer.invoke('game-invite-cancel',id),
+  acceptGameInvite: id => ipcRenderer.invoke('game-invite-accept',id),
+  toggleSocialOverlay: () => ipcRenderer.invoke('social-overlay-toggle'),
+  closeSocialOverlay: () => ipcRenderer.invoke('social-overlay-close'),
   getXboxFriends: () => ipcRenderer.invoke('xbox-friends'),
   getXboxConversation: xuid => ipcRenderer.invoke('xbox-conversation', xuid),
   sendXboxMessage: (xuid, text) => ipcRenderer.invoke('xbox-send-message', xuid, text),

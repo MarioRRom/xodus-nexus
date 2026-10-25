@@ -89,6 +89,7 @@ export async function cloudSaveRuntime(winePath: string): Promise<boolean> {
   const features = await runtimeFeatures(winePath);
   return features.includes('cloud-saves-pr28') && features.includes('xodus-tcp-bridge-v1');
 }
+export async function gameInviteRuntime(winePath:string):Promise<boolean>{return (await runtimeFeatures(winePath)).includes('xgame-invitations-v1');}
 
 export async function storeContentRuntime(winePath: string): Promise<boolean> {
   const features = await runtimeFeatures(winePath);
