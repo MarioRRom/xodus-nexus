@@ -6,8 +6,9 @@ import { readDiagnosticTail } from './diagnostic-log.js';
 import { sessionStages, ticketFailureDiagnostic } from './session-errors.js';
 import { contentLicenseDiagnostic, contentLicenseStages } from '../shared/content-license.js';
 import { transferDiagnostic, transferStages } from '../shared/transfer-failure.js';
+import { keyringSteps, keyringFailures, keyringBusErrors, type KeyringDiagnostic } from './keyring-diagnostic.js';
 
-const operations = new Set(['account', 'profile', 'achievements', 'library', 'login', 'logout', 'streaming', 'download', 'license', 'run', 'resolve-package', 'service', 'probe']);
+const operations = new Set(['keyring', 'account', 'profile', 'achievements', 'library', 'login', 'logout', 'streaming', 'download', 'license', 'run', 'resolve-package', 'service', 'probe']);
 const credentialStages = new Set(['keyring-unavailable', 'keyring-invalid-data', 'keyring-missing-data', 'keyring-write-verification', 'credential-io', 'device-authentication']);
 const stages = new Set([
   ...sessionStages,
@@ -24,7 +25,7 @@ const stages = new Set([
 ]);
 type Event = 'start' | 'exit' | 'spawn-error' | 'diagnostic' | 'validation';
 type Context = { launcher?: string; backend?: string; source?: string };
-type RecordData = { operation: string; event: Event; stage?: string; status?: number; skipped?: number; code?: number; serviceCode?: string; signal?: string; elapsedMs?: number };
+type RecordData = { operation: string; event: Event; stage?: string; status?: number; skipped?: number; code?: number; serviceCode?: string; signal?: string; elapsedMs?: number; keyring?: KeyringDiagnostic };
 const version = (value?: string) => value && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value) ? value : 'unknown';
 
 /** Allowlisted metadata only. Never persists child output, argv, auth frames or identifiers. */
@@ -82,6 +83,12 @@ export class BackendDiagnostics {
       && ['ticket-refused', 'ticket-interaction-required'].includes(data.stage ?? '')) entry.serviceCode = data.serviceCode;
     if (data.signal && ['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGSEGV', 'SIGABRT', 'SIGPIPE'].includes(data.signal)) entry.signal = data.signal;
     if (Number.isFinite(data.elapsedMs)) entry.elapsedMs = Math.max(0, Math.min(86_400_000, Math.round(data.elapsedMs!)));
+    if (data.operation === 'keyring' && data.event === 'diagnostic' && data.keyring
+      && keyringSteps.includes(data.keyring.step) && keyringFailures.includes(data.keyring.failure)) {
+      entry.keyringStep = data.keyring.step;
+      entry.keyringFailure = data.keyring.failure;
+      if (data.keyring.dbusError && keyringBusErrors.includes(data.keyring.dbusError)) entry.dbusError = data.keyring.dbusError;
+    }
     this.pending++;
     this.queue = this.queue.then(() => this.append(JSON.stringify(entry) + '\n')).catch(() => { this.failed = true; }).finally(() => { this.pending--; });
   }

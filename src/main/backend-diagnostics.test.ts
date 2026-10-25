@@ -6,6 +6,25 @@ import { spawn } from 'node:child_process';
 import { BackendDiagnostics, BackendDiagnosticReader, observeBackendChild, setBackendDiagnostics } from './backend-diagnostics.js';
 import { spawnTracked } from './process.js';
 
+it('records only fixed keyring failure metadata, never collection paths or provider text (#329)', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-keyring-diagnostic-'));
+  try {
+    const log = new BackendDiagnostics(root);
+    log.record({operation:'keyring',event:'diagnostic',elapsedMs:2042,keyring:{step:'ReadAlias',failure:'timeout',dbusError:'org.freedesktop.DBus.Error.NoReply',elapsedMs:2042}});
+    log.record({operation:'keyring',event:'diagnostic',keyring:{step:'Locked',failure:'dbus-error',dbusError:'org.freedesktop.DBus.Error.AccessDenied',elapsedMs:1}});
+    const privateData={step:'/private_collection',failure:'secret password',dbusError:'org.freedesktop.DBus.Error.PrivateAccount',elapsedMs:1};
+    log.record({operation:'keyring',event:'diagnostic',keyring:privateData as never});
+    log.record({operation:'keyring',event:'diagnostic',keyring:{...privateData,step:'ReadAlias',failure:'unavailable'} as never});
+    log.record({operation:'login',event:'diagnostic',keyring:{step:'Locked',failure:'timeout',elapsedMs:1}});
+    const {content}=await log.read(), records=content.trim().split('\n').map(s=>JSON.parse(s));
+    expect(records.filter(r=>r.keyringStep)).toHaveLength(3);
+    expect(records.filter(r=>r.dbusError)).toHaveLength(2);
+    expect(records[0]).toMatchObject({operation:'keyring',keyringStep:'ReadAlias',keyringFailure:'timeout',elapsedMs:2042});
+    expect(content).not.toMatch(/private_collection|secret password|PrivateAccount/);
+    expect((await fs.stat(path.join(root,'backend-diagnostics','backend.log'))).mode & 0o777).toBe(0o600);
+  } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
+
 it('records bounded access-resolution reasons without product IDs, account data or arbitrary text', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-access-diagnostic-'));
   try {
