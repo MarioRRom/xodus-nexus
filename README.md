@@ -68,6 +68,8 @@ Flatpak version available through Discover. Other browsers are not supported.
 
 Open **Friends** in the bottom-right corner for your Xbox friends list, text conversations and game invitations. Chat requires a compatible Nexus backend and your account's communication permissions. The visible panel refreshes conversations automatically. If delivery cannot be confirmed, check the conversation before sending again.
 
+With a compatible launcher and runtime, supported games also publish their Xbox playing status after sign-in. The game is removed from that status when it closes; Xbox privacy settings still apply.
+
 Invitations require a compatible Nexus runtime and a running game. Use the game's **Invite friends** action to choose a friend, or select **Invite to game** when the game has published a joinable activity. Incoming invitations appear in Friends and can be accepted there. This does not add multiplayer support to games that cannot connect to their services.
 
 ## Wallet setup and unlocking
@@ -111,7 +113,7 @@ but have not been verified and may encounter compatibility issues.
 
 | Game | Playable | Status |
 | --- | --- | --- |
-| Gears of War: E-Day | Yes | Playable online. |
+| Gears of War: E-Day | Yes | Playable online; Xbox playing status works. |
 | Deep Rock Galactic | Yes | Playable online. |
 | Minecraft Dungeons | Yes | Playable online with launcher 0.3.5; [ownership failures](https://github.com/domsvoboda/xodus-nexus/issues/80) also reported on other setups. |
 | Minecraft Dungeons II | Yes | Playable online. |
