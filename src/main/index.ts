@@ -1685,6 +1685,19 @@ function restoredBoundsOnScreen(state: WindowState): boolean {
   });
 }
 
+async function prepareFirstRunBackend(): Promise<void> {
+  await backend.checkUpdate();
+  emitSnapshot();
+  if (shutdownStarted || store.settings.firstRunCompleted || backend.current.available ||
+      backend.current.updating || !backend.current.releaseAvailable || !backend.current.updateAvailable) return;
+  try {
+    // Uses the same checksum-verified managed installer and activity guards as Settings.
+    await backend.update(emitSnapshot);
+    if (!shutdownStarted && mainWindow?.isVisible()) void refreshInitialAccount().catch(() => {});
+  } catch { /* Keep the installer error visible for an explicit retry in the wizard. */ }
+  finally { emitSnapshot(); }
+}
+
 async function createWindow(): Promise<void> {
   const smokeScreenshot = process.env.XODUS_NEXUS_SMOKE_SCREENSHOT;
   const smokeStoreQuery = process.env.XODUS_NEXUS_SMOKE_STORE_QUERY;
@@ -1881,20 +1894,7 @@ app.whenReady().then(async () => {
   backend = new BackendManager(app.getPath('userData'), store.settings.externalXodusRoot, emitLog, () => keyringSupport.busy || downloadCancellations.size > 0 || operations.size > 0 || installQueue.size > 0 || preparingInstall || runtime?.current.updating === true);
   await backend.refresh();
   await runtime.refresh();
-  void backend.checkUpdate().then(async () => {
-    // First run: install the prebuilt backend automatically so the setup
-    // wizard's sign-in step works without a detour into Settings. Users who
-    // configured a validated external backend are left alone; the managed
-    // release never touches an external checkout.
-    if (!store.settings.firstRunCompleted && !backend.current.available &&
-        backend.current.releaseAvailable && backend.current.updateAvailable) {
-      try {
-        await backend.update(emitSnapshot);
-        if (mainWindow?.isVisible()) void refreshInitialAccount().catch(() => { /* The setup UI remains usable. */ });
-      } catch { /* The block reason stays visible in the wizard and Settings. */ }
-    }
-    emitSnapshot();
-  }, () => { /* Keep the installed backend available if GitHub is unreachable. */ });
+  void prepareFirstRunBackend().catch(() => emitSnapshot());
   void runtime.checkNexus().then(() => emitSnapshot(), () => { /* Nexus runtime is optional. */ });
   await syncManagedWinePath();
   void enrichLibraryCovers().then(() => emitSnapshot(), () => { /* Covers are optional. */ });

@@ -942,10 +942,9 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
 }
 
 function backendSetupHint(backend: AppSnapshot['backend']): string {
-  if (backend.checking) return 'Checking for the Xodus backend…';
-  if (backend.updating) return backend.phase ? `Installing the Xodus backend… ${backend.phase}` : 'Installing the Xodus backend…';
+  if (backend.checking || backend.updating) return 'Preparing sign-in…';
   if (backend.blockReason) return backend.blockReason;
-  return 'Sign-in unlocks once the Xodus backend is installed.';
+  return 'Preparing sign-in…';
 }
 
 function PasskeySignInNotice() {
@@ -956,6 +955,14 @@ export function FirstRunWizard({ data, toast }: { data: AppSnapshot; toast: (val
   const [installRoot, setInstallRoot] = useState(data.settings.installRoot);
   const [saving, setSaving] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [installingBackend, setInstallingBackend] = useState(false);
+
+  async function retryBackend() {
+    setInstallingBackend(true);
+    try { await window.launcher.updateBackend(); }
+    catch (error) { toast({ kind: 'error', message: errorMessage(error) }); }
+    finally { setInstallingBackend(false); }
+  }
 
   async function browse() {
     try {
@@ -993,10 +1000,11 @@ export function FirstRunWizard({ data, toast }: { data: AppSnapshot; toast: (val
         <div className="input-action"><input data-gamepad-initial value={installRoot} onChange={(event) => setInstallRoot(event.target.value)} /><button onClick={() => void browse()} title="Browse"><FolderOpen /></button></div>
         <small>New games download and extract into this folder.</small>
       </label>
-      <KeyringSetup compact disabled={signingIn || data.auth.running} />
+      <KeyringSetup compact disabled={signingIn || data.auth.running || data.backend.updating || installingBackend} />
       <div className="wizard-account">
         <div><strong>Microsoft account</strong><small>{data.backend.available ? (data.auth.stored === true ? `Signed in as ${data.auth.username ?? 'stored account'}` : data.auth.stored === false ? 'Not signed in yet — Store browsing works without an account' : 'Account status is still being checked') : backendSetupHint(data.backend)}</small></div>
-        <button className="secondary" disabled={!data.backend.capabilities.login || signingIn || data.auth.running} onClick={() => void signIn()}>{signingIn ? <LoaderCircle className="spin" /> : <LogIn />}{data.auth.stored ? 'Sign in again' : 'Sign in'}</button>
+        {!data.backend.available&&data.backend.blockReason&&!data.backend.checking&&!data.backend.updating?<button className="secondary" disabled={installingBackend||signingIn||data.auth.running} onClick={()=>void retryBackend()}>Retry setup</button>:null}
+        <button className="secondary" disabled={!data.backend.available || !data.backend.capabilities.login || data.backend.updating || installingBackend || signingIn || data.auth.running} onClick={() => void signIn()}>{signingIn ? <LoaderCircle className="spin" /> : <LogIn />}{data.auth.stored ? 'Sign in again' : 'Sign in'}</button>
       </div>
       <div className="wizard-actions">
         <PasskeySignInNotice />
