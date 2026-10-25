@@ -2,6 +2,7 @@ import {createServer,type Socket} from 'node:net';
 import {randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {emptyGameInvites,inviteGuid,validateGameInviteUri,type GameInviteState} from '../shared/game-invites.js';
 import {xboxUserId} from '../shared/social.js';
+import type {XboxTitlePresence} from './xbox-title-presence.js';
 const INVALID=0x80070057,ABORT=0x80004004,PENDING=0x8000000a,DENIED=0x80070005;
 export function encodeInviteFields(fields:string[]):Buffer{
   const values=fields.map(value=>Buffer.from(value,'utf8'));const count=Buffer.alloc(4);count.writeUInt32LE(values.length);
@@ -29,11 +30,12 @@ export class GameInviteBridge {
   private lastSeen=0;
   private sequence=0;
   private stopped=false;
+  private stopping?:Promise<void>;
   private clients=new Set<Socket>();
   private server?:ReturnType<typeof createServer>;
   readonly key=randomBytes(32).toString('hex');
   port=0;
-  constructor(readonly id:string,readonly game:string,readonly titleId:string,private current:()=>boolean,private changed:()=>void,private show:()=>void,private now=Date.now,private notified:(sender:string)=>void=()=>{}){}
+  constructor(readonly id:string,readonly game:string,readonly titleId:string,private current:()=>boolean,private changed:()=>void,private show:()=>void,private now=Date.now,private notified:(sender:string)=>void=()=>{},private presence?:XboxTitlePresence){}
   async start():Promise<void>{
     if(this.server)throw Error('Invite bridge already started.');
     const expected=Buffer.from(this.key,'ascii');
@@ -58,6 +60,12 @@ export class GameInviteBridge {
   state():GameInviteState{if(this.stopped||!this.current())return emptyGameInvites();this.prune();return {active:this.lastSeen&&this.now()-this.lastSeen<20000?[{id:this.id,game:this.game}]:[],outgoing:[...this.requests.values()].map(value=>({id:this.id+':'+value.id,game:this.game,phase:value.phase})),incoming:[...this.invitations.values()].map(value=>({id:this.id+':'+value.id,game:this.game,sender:value.sender,expires:value.expires}))};}
   exchange(fields:string[]):[number,string[]]{
     if(this.stopped||!this.current())return [DENIED,[]];this.prune();const [op,...args]=fields;
+    if(op==='presence-ready'&&args.length===0)return [this.presence?0:0x80004001,[]];
+    if(op==='presence'&&args.length===5&&xboxUserId(args[0])&&args[1]===this.titleId){
+      if(this.user&&this.user!==args[0])return [DENIED,[]];
+      if(!this.presence?.accept(args[0],args[2],args[3],args[4]))return [DENIED,[]];
+      this.user=args[0];return [0,[]];
+    }
     if((op==='hello'||op==='hello-events')&&args.length===2&&xboxUserId(args[0])&&args[1]===this.titleId){if(this.user&&this.user!==args[0])return [DENIED,[]];this.user=args[0];if(op==='hello-events'){const fresh=!this.lastSeen||this.now()-this.lastSeen>=20000;this.lastSeen=this.now();if(fresh)this.changed();}return [0,[]];}
     if(!this.user)return [DENIED,[]];
     if(op==='present-activity'&&args.length===1&&inviteGuid(args[0])){if(this.requests.has(args[0])||this.requests.size>=16)return [INVALID,[]];this.requests.set(args[0],{id:args[0],phase:'choosing',expires:this.now()+180000});this.changed();this.show();return [0,[]];}
@@ -92,6 +100,11 @@ export class GameInviteBridge {
     const key=id.slice(this.id.length+1),value=this.invitations.get(key);if(!value)throw Error('Invitation expired or was already accepted.');
     this.events.push({sequence:++this.sequence,fields:['accepted',value.uri]});if(this.events.length>32)this.events.shift();this.invitations.delete(key);this.changed();
   }
-  async stop():Promise<void>{if(this.stopped)return;this.stopped=true;for(const client of this.clients)client.destroy();this.requests.clear();this.invitations.clear();this.events=[];if(this.server?.listening)await new Promise<void>(resolve=>this.server!.close(()=>resolve()));this.changed();}
+  stop():Promise<void>{
+    if(this.stopping)return this.stopping;
+    this.stopped=true;for(const client of this.clients)client.destroy();this.requests.clear();this.invitations.clear();this.events=[];
+    this.stopping=(async()=>{if(this.server?.listening)await new Promise<void>(resolve=>this.server!.close(()=>resolve()));await this.presence?.stop();this.changed();})();
+    return this.stopping;
+  }
 }
 export function combinedInviteState(bridges:Iterable<GameInviteBridge>):GameInviteState{const state=emptyGameInvites();for(const bridge of bridges){const value=bridge.state();state.active.push(...value.active);state.outgoing.push(...value.outgoing);state.incoming.push(...value.incoming);}return state;}

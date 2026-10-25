@@ -63,6 +63,7 @@ import { DownloadCompletionNotifications } from './download-notifications.js';
 import { KeyringSupport } from './keyring.js';
 import { XboxSocialSessions } from './xbox-social.js';
 import { GameInviteBridge, combinedInviteState } from './game-invite-bridge.js';
+import {XboxTitlePresence} from './xbox-title-presence.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
@@ -966,10 +967,11 @@ async function prepareGameLaunch(id: string): Promise<void> {
     }
     if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&await gameInviteRuntime(wine)){
       const account=authState.username,epoch=xboxSocial.epoch;
-      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
+      const current=()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch;
+      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),current,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
         if(!Notification.isSupported())return;
         try{const notice=new Notification({title:'Game invitation',body:`${sender} invited you to ${game.title}. Open Friends to accept.`,urgency:'normal'});notice.on('click',()=>{void showFriends().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
-      });
+      },new XboxTitlePresence(current,addGameLog));
       try{
         await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
         environment.NEXUS_INVITE_PORT=String(inviteBridge.port);environment.NEXUS_INVITE_KEY=inviteBridge.key;
@@ -1925,7 +1927,7 @@ app.on('before-quit', (event) => {
   accountLibrary.reset();
   accountProfile?.cancel();
   accountRefresh.invalidate();
-  if (shutdownStarted || (!xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
+  if (shutdownStarted || (!xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && gameInviteBridges.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
   event.preventDefault();
   shutdownStarted = true;
   void (async () => {
@@ -1956,6 +1958,7 @@ app.on('before-quit', (event) => {
       new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
     ]);
     await Promise.all([...gameProcesses.values()].map((process) => process.forceStop().catch((error) => console.error('Could not force-stop game on exit:', error))));
+    await Promise.all([...gameInviteBridges.values()].map(bridge=>bridge.stop().catch(()=>{})));
     await Promise.all([...serviceSessions.values()].map((session) => session.stop().catch((error) => console.error('Account service cleanup failed on exit:', error))));
   })().catch((error) => console.error('Launcher shutdown cleanup failed:', error)).finally(async () => {
     await backendDiagnostics?.flush();
