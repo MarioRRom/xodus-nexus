@@ -53,8 +53,16 @@ describe('persistent shader cache', () => {
     const result = JSON.parse((await execFile(runner.command, [], { env: environment() })).stdout);
     expect(result).toMatchObject({ VKD3D_SHADER_CACHE_PATH: path.join(f.cache, 'vkd3d-proton'),
       __GL_SHADER_DISK_CACHE_PATH: path.join(f.cache, 'nvidia'), __GL_SHADER_DISK_CACHE: '1',
-      __GL_SHADER_DISK_CACHE_SKIP_CLEANUP: null, __GL_SHADER_DISK_CACHE_SIZE: '2147483648',
-      MESA_SHADER_CACHE_DIR: path.join(f.cache, 'mesa'), MESA_SHADER_CACHE_MAX_SIZE: '2G' });
+      __GL_SHADER_DISK_CACHE_SKIP_CLEANUP: null, __GL_SHADER_DISK_CACHE_SIZE: '4294967296',
+      MESA_SHADER_CACHE_DIR: path.join(f.cache, 'mesa'), MESA_SHADER_CACHE_MAX_SIZE: '4G' });
+  });
+
+  it.each([[0.25,'268435456','256M'],[2.5,'2684354560','2560M'],[8,'8589934592','8G']])('applies the chosen %s GiB limit to real driver environments',async(gib,bytes,mesa)=>{
+    const f=await fixture(),runner=(await prepareProtonRunner(f.wine,f.compat,f.steam,f.wine,Number(gib)))!;
+    const result=JSON.parse((await execFile(runner.command,[],{env:environment()})).stdout);
+    expect(result.__GL_SHADER_DISK_CACHE_SIZE).toBe(bytes);expect(result.MESA_SHADER_CACHE_MAX_SIZE).toBe(mesa);
+    const override=JSON.parse((await execFile(runner.command,[],{env:environment({__GL_SHADER_DISK_CACHE_SIZE:'123',MESA_SHADER_CACHE_MAX_SIZE:'512M'})})).stdout);
+    expect(override.__GL_SHADER_DISK_CACHE_SIZE).toBe('123');expect(override.MESA_SHADER_CACHE_MAX_SIZE).toBe('512M');
   });
 
   it('does not impose managed enable/size defaults on custom driver directories', async () => {

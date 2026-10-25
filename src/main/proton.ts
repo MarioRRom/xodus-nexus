@@ -7,6 +7,7 @@ import { prepareManagedPrefix } from './managed-prefix.js';
 import { systemGameLocale } from './game-locale.js';
 import { windowsGameLocale } from '../shared/game-language.js';
 import { prepareShaderCache } from './shader-cache.js';
+import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-cache.js';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -339,7 +340,9 @@ export async function prepareProtonRunner(
   compatibilityDataPath: string,
   steamRoot: string,
   gameWineCommand = winePath,
+  shaderCacheLimitGiB = DEFAULT_SHADER_CACHE_GIB,
 ): Promise<ProtonRunner | undefined> {
+  const cacheLimits = shaderCacheLimits(shaderCacheLimitGiB);
   const protonRoot = path.resolve(path.dirname(winePath), '..', '..');
   const proton = path.join(protonRoot, 'proton');
   const defaultPrefix = path.join(protonRoot, 'files', 'share', 'default_pfx');
@@ -469,11 +472,11 @@ export async function prepareProtonRunner(
     'if [ "${__GL_SHADER_DISK_CACHE_PATH+x}" != x ]; then',
     `  export __GL_SHADER_DISK_CACHE_PATH=${shellQuote(shaderCaches.nvidia)}`,
     ...defaultEnvironment('__GL_SHADER_DISK_CACHE', '1'),
-    ...defaultEnvironment('__GL_SHADER_DISK_CACHE_SIZE', '2147483648'),
+    ...defaultEnvironment('__GL_SHADER_DISK_CACHE_SIZE', cacheLimits.bytes),
     'fi',
     'if [ "${MESA_SHADER_CACHE_DIR+x}" != x ]; then',
     `  export MESA_SHADER_CACHE_DIR=${shellQuote(shaderCaches.mesa)}`,
-    ...defaultEnvironment('MESA_SHADER_CACHE_MAX_SIZE', '2G'),
+    ...defaultEnvironment('MESA_SHADER_CACHE_MAX_SIZE', cacheLimits.mesa),
     'fi',
     // Use Steam's genuine compatibility bridge when installed. Never force a
     // particular game to load it or replace an explicit user configuration.

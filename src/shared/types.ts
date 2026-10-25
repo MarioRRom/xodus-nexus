@@ -174,6 +174,7 @@ export interface Settings {
   market: string;
   parallelDownloads: number;
   downloadLimitMiB?: number;
+  shaderCacheLimitGiB?: number;
   winePath: string;
   externalXodusRoot: string;
   runtimeRoot: string;

@@ -7,6 +7,17 @@ import type { DownloadTask } from '../shared/types.js';
 
 const created: string[] = [];
 
+it('persists a custom shader cache limit and safely migrates missing or invalid values to 4 GiB',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'nexus-cache-state-'));created.push(directory);
+  const store=new StateStore(directory);await store.load();expect(store.settings.shaderCacheLimitGiB).toBe(4);
+  await store.setSettings({shaderCacheLimitGiB:8.5});const reopened=new StateStore(directory);await reopened.load();expect(reopened.settings.shaderCacheLimitGiB).toBe(8.5);
+  await expect(reopened.setSettings({shaderCacheLimitGiB:0})).rejects.toThrow('Shader cache limit');expect(reopened.settings.shaderCacheLimitGiB).toBe(8.5);
+  for(const value of [undefined,null,'8',0,-1,0.1,2048]){
+    await writeFile(path.join(directory,'launcher-state.json'),JSON.stringify({settings:{shaderCacheLimitGiB:value}}));
+    const migrated=new StateStore(directory);await migrated.load();expect(migrated.settings.shaderCacheLimitGiB).toBe(4);
+  }
+});
+
 describe('download bandwidth settings', () => {
   it('defaults to unlimited and persists fractional MiB/s without changing parallelism', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'nexus-bandwidth-state-')); created.push(directory);

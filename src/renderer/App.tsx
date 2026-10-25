@@ -10,6 +10,7 @@ import { estimateTimeRemaining } from '../shared/utils';
 import { nexusRuntimeUpdateAvailable, runtimeDisplay } from '../shared/runtime-display';
 import { subscriptionBadge } from '../shared/subscription';
 import { defaultLaunchTools, normalizeLaunchTools } from '../shared/launch-tools';
+import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-cache';
 import type { GameLaunchTools } from '../shared/types';
 import { catalogInstallRequest, PackageInstallProvider, usePackageInstall } from './PackageInstall';
 import { defaultLibraryFilters, loadLibraryFilters, saveLibraryFilters, libraryProductMatchesPlayState, type LibraryFilters } from './library-preferences';
@@ -868,6 +869,8 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
   }
 
   const caps = data.backend.capabilities;
+  let cacheLimitValid = true;
+  try { shaderCacheLimits(form.shaderCacheLimitGiB ?? DEFAULT_SHADER_CACHE_GIB); } catch { cacheLimitValid = false; }
   const runtimeInfo = runtimeDisplay(data.runtime);
   return <main className="page settings-page">
     <header className="page-header"><div><h1>Settings</h1><p>Account, backend, runtime, and storage.</p></div></header>
@@ -915,6 +918,11 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
     </section>
 
     <div className="settings-storage">
+      <section className="settings-card compact">
+        <div className="settings-heading"><div className="settings-icon"><HardDrive /></div><div><h2>Shader cache</h2><p>Limit Mesa and NVIDIA driver caches per game.</p></div></div>
+        <div className="form-grid"><label>Driver cache limit (GiB)<input type="number" min="0.25" max="1024" step="0.25" value={form.shaderCacheLimitGiB ?? DEFAULT_SHADER_CACHE_GIB} onChange={event=>setForm({...form,shaderCacheLimitGiB:Number(event.target.value)})} /></label></div>
+        <div className="save-row"><span>Default: 4 GiB. Applies on the next game launch. Explicit environment overrides take precedence.</span><button className="primary" disabled={Boolean(busy)||!cacheLimitValid} onClick={()=>invoke('save-shader-cache',()=>window.launcher.updateSettings({shaderCacheLimitGiB:form.shaderCacheLimitGiB ?? DEFAULT_SHADER_CACHE_GIB}),'Shader cache limit saved. Applies on the next game launch.')}>{busy==='save-shader-cache'?<LoaderCircle className="spin" />:<Check />}Save cache limit</button></div>
+      </section>
       <section className="settings-card compact">
         <div className="settings-heading"><div className="settings-icon"><Download /></div><div><h2>Downloads</h2><p>Limit the combined game download speed across all parallel streams.</p></div></div>
         <div className="form-grid"><label>Download speed limit (MiB/s)<input type="number" min="0" max="1024" step="0.1" value={form.downloadLimitMiB ?? 0} onChange={event => setForm({...form, downloadLimitMiB:Number(event.target.value)})} /></label></div>

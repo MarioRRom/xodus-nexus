@@ -30,6 +30,7 @@ const h = vi.hoisted(() => ({
   discoverySupported: false,
   libraryReads: 0,
   launchEnvironments: [] as NodeJS.ProcessEnv[],
+  backendRefreshes: 0, runtimeRefreshes: 0,
   prefixLocales: [] as (string | undefined)[],
   planOverrides: new Map<string, any>(),
   libraryRows: [] as any[],
@@ -48,9 +49,9 @@ vi.mock('electron', () => ({
   dialog: { showMessageBox: h.showMessage, showSaveDialog: h.showSave }, nativeImage: {}, shell: { trashItem: h.trash }, powerSaveBlocker: { start: h.blockDisplay, stop: h.releaseDisplay },
 }));
 vi.mock('./backend.js', () => ({ LINUX_RUN_PATCH: 'test-patch', BackendManager: class {
-  get current() { return h.backend; } async refresh() {} async checkUpdate() {} async externalDownloadRunning() { return false; }
+  get current() { return h.backend; } async refresh() {h.backendRefreshes++;} async checkUpdate() {} async externalDownloadRunning() { return false; }
   setExternalRoot() {} } }));
-vi.mock('./runtime.js', () => ({ RuntimeManager: class { get current() { return h.runtime; } async refresh() {} async checkNexus() {} setRoot() {} } }));
+vi.mock('./runtime.js', () => ({ RuntimeManager: class { get current() { return h.runtime; } async refresh() {h.runtimeRefreshes++;} async checkNexus() {} setRoot() {} } }));
 vi.mock('./catalog.js', () => ({ CatalogService: class { async artwork() { return new Map(); } posters = h.posters; } }));
 vi.mock('./account-profile.js', () => ({ AccountProfile: class { async select() {} cancel() {} } }));
 vi.mock('./launcher-update.js', () => ({ LauncherUpdater: class { state = {}; async initialize() {} async check() {} cancel() {} } }));
@@ -107,6 +108,15 @@ vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_
 const ipc = (name: string, ...args: any[]) => h.handlers.get(name)!(undefined, ...args);
 const snapshot = () => ipc('get-snapshot');
 const install = (letter: string, destination = path.join(h.root, `download-${letter}`)) => ipc('start-install', { productId: `9${letter.repeat(11)}`, title: `Sample ${letter}`, destination });
+
+it('saves shader cache limits through real IPC without refreshing components or changing installation state',async()=>{
+  const refreshes=[h.backendRefreshes,h.runtimeRefreshes],downloads=snapshot().downloads,library=snapshot().games;
+  await ipc('update-settings',{shaderCacheLimitGiB:8.5});expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(snapshot().downloads).toEqual(downloads);expect(snapshot().games).toEqual(library);
+  for(const value of [0,-1,'bad',2048])await expect(ipc('update-settings',{shaderCacheLimitGiB:value})).rejects.toThrow('Shader cache limit');
+  expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+});
 
 beforeAll(async () => {
   h.root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-install-integration-'));

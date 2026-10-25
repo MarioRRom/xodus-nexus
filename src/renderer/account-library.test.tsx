@@ -6,6 +6,12 @@ import { defaultLaunchTools } from '../shared/launch-tools';
 import { demoSnapshot } from '../shared/demo-data';
 import type { AccountLibraryPage } from '../shared/types';
 
+it('offers a configurable four-GiB driver shader cache limit with a separate save action',()=>{
+  const data=demoSnapshot();let html=renderToStaticMarkup(<SettingsPage data={data} toast={()=>{}} />);
+  expect(html).toContain('Driver cache limit (GiB)');expect(html).toContain('Default: 4 GiB');expect(html).toContain('Save cache limit');expect(html).toContain('next game launch');
+  data.settings.shaderCacheLimitGiB=8.5;html=renderToStaticMarkup(<SettingsPage data={data} toast={()=>{}} />);expect(html).toContain('value="8.5"');
+});
+
 it('keeps unknown-source counts in diagnostics instead of rendering a technical library banner', () => {
   const source = readFileSync('src/renderer/App.tsx', 'utf8');
   const library = source.slice(source.indexOf('export function AccountGames('), source.indexOf('function AccountGamesForUser('));

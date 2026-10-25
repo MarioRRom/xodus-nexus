@@ -219,7 +219,7 @@ describe('prepareProtonRunner', () => {
     for (const name of ['VKD3D_SHADER_CACHE_PATH', '__GL_SHADER_DISK_CACHE_PATH', '__GL_SHADER_DISK_CACHE', '__GL_SHADER_DISK_CACHE_SKIP_CLEANUP', '__GL_SHADER_DISK_CACHE_SIZE', 'MESA_SHADER_CACHE_DIR', 'MESA_SHADER_CACHE_MAX_SIZE']) delete clean[name];
     const defaults = await execFile(runner!.command, [], { env: clean });
     expect(defaults.stdout.trim().split('\n')).toEqual([
-      path.join(cache, 'vkd3d-proton'), path.join(cache, 'nvidia'), '1', '', path.join(cache, 'mesa'), '2G', '2147483648',
+      path.join(cache, 'vkd3d-proton'), path.join(cache, 'nvidia'), '1', '', path.join(cache, 'mesa'), '4G', '4294967296',
     ]);
     const explicit = await execFile(runner!.command, [], { env: { ...clean, VKD3D_SHADER_CACHE_PATH: '/mine/vkd3d', __GL_SHADER_DISK_CACHE_PATH: '/mine/nv', MESA_SHADER_CACHE_DIR: '/mine/mesa' } });
     expect(explicit.stdout.trim().split('\n').filter((line, index) => index === 0 || index === 1 || index === 4)).toEqual(['/mine/vkd3d', '/mine/nv', '/mine/mesa']);

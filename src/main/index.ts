@@ -10,6 +10,7 @@ import { downloadFailure, safeProductId } from '../shared/utils.js';
 import { contentLicenseFailure } from '../shared/content-license.js';
 import { downloadLimitArgs, downloadLimitKiB } from '../shared/download-bandwidth.js';
 import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-bandwidth.js';
+import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cache.js';
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
 import { backendLock } from './backend-package.js';
 import { BackendManager } from './backend.js';
@@ -918,7 +919,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
     const steamRoot = path.join(app.getPath('home'), '.steam', 'root');
     launchWrapper = await prepareGameWrapper(wine, game.launchTools, path.join(dataRoot, 'launch-wrappers'), process.env, game.path);
-    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, steamRoot, launchWrapper.command);
+    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, steamRoot, launchWrapper.command, store.settings.shaderCacheLimitGiB);
     const wineCommand = protonRunner?.command ?? wine;
     args[2] = preparedGameWine(protonRunner, launchWrapper.command);
     if (inspected.vcRedistEncrypted) {
@@ -1086,7 +1087,7 @@ async function installGameVcRuntime(id: string): Promise<void> {
   preparationControllers.set(operationId, controller);
   try {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
-    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'));
+    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'), undefined, store.settings.shaderCacheLimitGiB);
     if (!protonRunner) throw new Error('VC++ installation requires a full Proton runtime, not a standalone Wine binary.');
     const prefix = path.join(compatibilityDataPath, 'pfx');
     const previous = await installedVcRuntimeVersion(prefix);
@@ -1601,12 +1602,14 @@ function registerIpc(): void {
     emitSnapshot();
   });
   ipcMain.handle('update-settings', async (_event, patch: Partial<Settings>) => {
+    if (patch.shaderCacheLimitGiB !== undefined) shaderCacheLimits(patch.shaderCacheLimitGiB);
     if (patch.downloadLimitMiB !== undefined) {
       downloadLimitKiB(patch.downloadLimitMiB);
       downloadLimitArgs(patch.downloadLimitMiB, backend.current.capabilities);
     }
     if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const).some(key => patch[key] !== undefined && patch[key] !== store.settings[key])) ensureIdle();
     const allowed: Partial<Settings> = {};
+    if (patch.shaderCacheLimitGiB !== undefined) allowed.shaderCacheLimitGiB = patch.shaderCacheLimitGiB;
     if (patch.downloadLimitMiB !== undefined) allowed.downloadLimitMiB = patch.downloadLimitMiB;
     if (typeof patch.installRoot === 'string') allowed.installRoot = path.resolve(patch.installRoot);
     if (typeof patch.market === 'string' && /^[A-Za-z-]{2,20}$/.test(patch.market)) allowed.market = patch.market;
@@ -1623,6 +1626,7 @@ function registerIpc(): void {
     }
     // A bandwidth-only change must not restart authentication or refresh devices.
     if (isBandwidthOnlyPatch(patch)) { emitSnapshot(); return settings; }
+    if (isShaderCacheOnlyPatch(patch)) { emitSnapshot(); return settings; }
     backend.setExternalRoot(settings.externalXodusRoot);
     runtime.setRoot(settings.runtimeRoot);
     await backend.refresh();
