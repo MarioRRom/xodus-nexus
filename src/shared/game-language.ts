@@ -13,7 +13,7 @@ export function normalizeGameLocale(value: string): string {
   }
   try {
     const locale = new Intl.Locale(tag);
-    if (locale.language === 'und') throw Error('A language is required.');
+    if (!locale.language || locale.language === 'und') throw Error('A language is required.');
     return locale.baseName;
   }
   catch { throw Error('Invalid game language code.'); }

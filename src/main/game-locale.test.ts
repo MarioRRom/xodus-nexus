@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -73,8 +73,17 @@ describe('game locale', () => {
     expect(gameLocaleEnvironment({ LANG: 'en_US.UTF-8' }, input)).toMatchObject({ XODUS_PACKAGE_LOCALE: input, WINEUSERLOCALE: windows, LANG: unix, LC_ALL: unix });
   });
 
-  it.each(['../../pl', 'de\nLANG=fr', 'en_US', 'ms-resource:Language', 'en-x-private', 'en-u-ca-gregory', 'x', '123', 'und', 'zh-Hant-CN'])('rejects unsafe or unresolvable override %s', input => {
+  it.each(['../../pl', 'de\nLANG=fr', 'en_US', 'ms-resource:Language', 'en-x-private', 'en-u-ca-gregory', 'x', '123', 'und', 'und-Latn', 'und-US', 'zh-Hant-CN'])('rejects unsafe or unresolvable override %s', input => {
     expect(() => supportedGameLocale(input)).toThrow();
+  });
+
+  it('rejects an absent Intl language instead of turning a locale into a bare region', () => {
+    const language = vi.spyOn(Intl.Locale.prototype, 'language', 'get').mockReturnValue(undefined as unknown as string);
+    try {
+      expect(() => normalizeGameLocale('und')).toThrow();
+      expect(() => supportedGameLocale('und-US')).toThrow();
+      expect(() => gameLocaleEnvironment({}, 'und-Latn')).toThrow();
+    } finally { language.mockRestore(); }
   });
 
   it('canonicalizes case and never leaks another title override into system default', () => {
