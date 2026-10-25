@@ -1704,7 +1704,9 @@ async function createWindow(): Promise<void> {
   // a window as large as the work area is still too tall: the window manager
   // adds its title bar, and on Wayland the work area often includes the
   // panel. Maximize instead, so that the window manager fits it.
-  const area = screen.getPrimaryDisplay().workArea;
+  const area = bounds.x === undefined || bounds.y === undefined
+    ? screen.getPrimaryDisplay().workArea
+    : screen.getDisplayMatching({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }).workArea;
   const tooLarge = bounds.width >= area.width || bounds.height >= area.height;
   if (bounds.x === undefined) {
     bounds.width = Math.min(bounds.width, area.width);
