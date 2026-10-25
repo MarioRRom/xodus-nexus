@@ -8,6 +8,21 @@ import path from 'node:path';
 import os from 'node:os';
 import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
 
+test('launch views require actual symbolic-link support and fall back only once (#341)',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-launch-filesystem.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/run.rs']);
+  for(const name of ['probe_launch_view_links','launch_directory_falls_back_when_install_filesystem_cannot_create_links',
+    'launch_directory_keeps_supported_install_filesystem_and_cleans_probe','launch_directory_does_not_hide_unrelated_io_failures_or_retry_forever'])assert.ok(patch.includes(name),name);
+  const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.match(added,/nix::libc::EPERM \| nix::libc::EOPNOTSUPP \| nix::libc::ENOSYS/);
+  assert.match(added,/launch_view_directory\(source_root, "\.xodus-chain-"\)/);
+  assert.match(added,/launch_view_directory\(source_root, "\.xodus-offline-"\)/);
+  assert.doesNotMatch(added,/get_license|tokens\.|full_key|Command::|set_permissions|mount\(|chmod|copy\(/);
+});
+
 test('Xbox friends/chat is explicit and account-bound without modifying login, saves or license paths', async () => {
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(p=>p.file==='xodus-social.patch');assert.ok(entry);
