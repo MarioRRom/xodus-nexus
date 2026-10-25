@@ -183,12 +183,12 @@ export function HomePage({ data, go, action }: {
   data: AppSnapshot; go: (page: Page) => void; action: (fn: () => Promise<unknown>, success?: string) => void;
 }) {
   const featured = data.games[0];
-  const active = data.downloads.find((task) => task.status === 'running' || task.status === 'paused');
   const canPlay = Boolean(featured?.installState === 'ready' && data.backend.capabilities.run && (data.settings.winePath || data.runtime.winePath));
   const launchOptions = useGameLaunchOptions(featured, data);
   const spotlightArt = featured?.heroUrl ?? featured?.coverUrl;
 
   return <main className="page home-page">
+    <div className={`home-highlights${data.games.length>1?' has-secondary':''}`}>
     <section className={`spotlight ${spotlightArt ? 'has-art' : ''}`} style={spotlightArt ? { '--spotlight-art': `url(${spotlightArt})` } as React.CSSProperties : undefined}>
       <div className="spotlight-copy">
         <span className="overline">{featured ? 'CONTINUE PLAYING' : 'XODUS NEXUS'}</span>
@@ -205,6 +205,10 @@ export function HomePage({ data, go, action }: {
       </div>
       {featured ? <div className="spotlight-meta"><StatePill game={featured} />{launchOptions?.cloudSaves ? <span>Cloud saves</span> : null}<span>{featured.storeId ? `Store ID ${featured.storeId}` : 'Local import'}</span></div> : null}
     </section>
+    {data.games.length>1?<div className="home-secondary">{data.games.slice(1,3).map(game=><button key={game.id} className="home-feature-card" onClick={()=>go('library')}>
+      <Cover game={game} variant="hero" /><span><strong>{game.title}</strong><small>{game.publisher??'In your library'}</small></span>
+    </button>)}</div>:null}
+    </div>
 
     <SectionTitle title="Recently added" action="See all" onClick={() => go('library')} />
     {data.games.length > 0 ? <div className="poster-row">
@@ -213,12 +217,6 @@ export function HomePage({ data, go, action }: {
       </button>)}
     </div> : <div className="empty-strip"><Gamepad2 /><div><strong>No games imported</strong><span>Your library is built only from real local manifests.</span></div><button className="secondary" onClick={() => go('library')}>Import folder</button></div>}
 
-    <SectionTitle title="Quick access" />
-    <div className="quick-grid">
-      <button onClick={() => go('store')}><Store /><span><strong>Install a game</strong><small>Use a verified Product ID</small></span><ChevronRight /></button>
-      <button onClick={() => go('downloads')}><Download /><span><strong>{active ? active.title : 'Install queue'}</strong><small>{active ? active.phase : 'No active downloads'}</small></span><ChevronRight /></button>
-      <button onClick={() => go('settings')}><Settings2 /><span><strong>Xodus runtime</strong><small>{data.runtime.installed ? 'Custom runtime ready' : 'Runtime setup required'}</small></span><ChevronRight /></button>
-    </div>
     <div className="support-bar"><CircleAlert /><div><strong>Compatibility status</strong><span>Package ownership and installation do not guarantee Wine, GameRuntime, or anti-cheat compatibility. Unsupported features are labelled explicitly.</span></div></div>
   </main>;
 }
