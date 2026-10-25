@@ -38,8 +38,9 @@ For an application-menu installation on supported distributions:
 curl -fsSL https://raw.githubusercontent.com/domsvoboda/xodus-nexus/main/scripts/install.sh | bash
 ```
 
-In **Settings**, install the **Nexus backend** and **Nexus runtime**, then sign in
-with your Microsoft account. A valid game purchase or subscription is required.
+On first startup, the launcher installs and verifies the **Nexus backend** in
+the background so you can sign in during setup. Install the **Nexus runtime**
+from **Settings** before launching games. A valid purchase or subscription is required.
 
 If passkey sign-in gets stuck, choose **Continue in browser** in the sign-in
 window. This option requires Google Chrome, either a native installation or the
@@ -102,9 +103,10 @@ Other license errors can have different causes.
 
 Every game uses the same launch path and shared runtime.
 
-The experimental [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
-is based on Valve's Proton Experimental. It is not yet installed automatically
-by released launchers.
+Runtime updates are downloaded from [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
+in **Settings**. It is based on Valve's Proton Experimental with
+[Nexus Wine](https://github.com/domsvoboda/nexus-wine) and
+[Nexus XGameRuntime](https://github.com/domsvoboda/nexus-xgameruntime).
 
 ## Compatible games
 
