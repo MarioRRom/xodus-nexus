@@ -36,3 +36,10 @@ it('does not reveal a window that was closed while its renderer loaded',async()=
   const opening=overlay.show();overlay.hide();complete(window);await opening;
   expect(window.show).not.toHaveBeenCalled();expect(window.isDestroyed()).toBe(true);
 });
+it('reopening while loading does not let a stale show destroy the new request',async()=>{
+  const window=fixture();let complete!:(w:OverlayWindow)=>void;
+  const create=vi.fn(()=>new Promise<OverlayWindow>(resolve=>{complete=resolve;}));
+  const overlay=new SocialOverlayWindow(create,()=>{});
+  const old=overlay.show();overlay.hide();const current=overlay.show();complete(window);await Promise.all([old,current]);
+  expect(window.isDestroyed()).toBe(false);expect(window.isVisible()).toBe(true);expect(create).toHaveBeenCalledOnce();
+});

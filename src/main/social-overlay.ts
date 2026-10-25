@@ -14,15 +14,17 @@ export class SocialOverlayWindow {
   private window?:OverlayWindow;
   private opening?:Promise<OverlayWindow>;
   private generation=0;
+  private showGeneration=-1;
   constructor(private create:()=>Promise<OverlayWindow>,private hidden:()=>void){}
   async show():Promise<void>{
     const generation=this.generation;
+    this.showGeneration=generation;
     let window=this.window;
     if(!window||window.isDestroyed()){
       this.opening??=this.create().finally(()=>{this.opening=undefined;});
       window=await this.opening;
     }
-    if(generation!==this.generation){if(!window.isDestroyed())window.destroy();return;}
+    if(generation!==this.generation){if(this.showGeneration!==this.generation&&!window.isDestroyed())window.destroy();return;}
     const created=window;
     if(this.window!==created){this.window=created;created.on('closed',()=>{if(this.window===created){this.window=undefined;this.hidden();}});}
     window.show();window.focus();
