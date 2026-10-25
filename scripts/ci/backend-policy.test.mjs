@@ -8,6 +8,26 @@ import path from 'node:path';
 import os from 'node:os';
 import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
 
+test('manifest-selected plain package executables keep licensing and encrypted-library handling (#239)',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-plain-launch-entry.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.ok(lock.patches.findIndex(value=>value.file===entry.file)>lock.patches.findIndex(value=>value.file==='xodus-launch-filesystem.patch'));
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/run.rs']);
+  for(const name of ['plain_launch_entry_uses_only_declared_package_images_and_preserves_sources',
+    'plain_launch_entry_never_treats_an_encrypted_or_undeclared_file_as_plaintext',
+    'plain_launch_entry_rejects_ambiguous_metadata_and_outside_package_links',
+    'launch_entry_prefers_exact_case_and_refuses_ambiguous_case_fallbacks'])assert.ok(patch.includes(name),name);
+  const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.match(added,/if content\.keep_encrypted \{ return Ok\(None\); \}/);
+  assert.match(added,/resolve_package_file\(source, name\)/);
+  assert.match(added,/open_launch_image\(&source\.join\(relative\), &actual_name, content\)/);
+  assert.match(added,/inherit_launch_image\(file, &actual_name\)/);
+  assert.match(added,/ambiguous package launch images/);
+  assert.doesNotMatch(added,/get_license|tokens\.|full_key|Command::|set_permissions|mount_mem_fd|\.unpack\(/);
+});
+
 test('launch views require actual symbolic-link support and fall back only once (#341)',async()=>{
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(value=>value.file==='xodus-launch-filesystem.patch');assert.ok(entry);
