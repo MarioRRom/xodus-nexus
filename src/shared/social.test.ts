@@ -1,8 +1,22 @@
 import { describe,expect,it } from 'vitest';
-import { parseXboxFriends,parseXboxConversation,xboxUserId,xboxMessageText,xboxAvatarUrl,xboxSocialError,xboxSocialErrors } from './social.js';
+import { parseXboxFriends,parseXboxConversation,parseXboxMessageReceipt,xboxSubmissionInHistory,xboxUserId,xboxMessageText,xboxAvatarUrl,xboxSocialError,xboxSocialErrors } from './social.js';
 const friend={xuid:'42',gamertag:'<Example>',presence:'online',activity:'A game'};
 const message={id:'one',sender:'42',at:'2026-10-25T00:00:00Z',hidden:false,text:'<script>plain</script>'};
 describe('Xbox social boundaries',()=>{
+  it('keeps a real receipt without claiming delivery and rejects legacy boolean-only success',()=>{
+    expect(parseXboxMessageReceipt({sent:true,messageId:'server-id',private:'ignored'})).toEqual({messageId:'server-id'});
+    for(const value of [null,{sent:true},{sent:false,messageId:'id'},{sent:true,messageId:42},{sent:true,messageId:''},{sent:true,messageId:' '},{sent:true,messageId:'x'.repeat(129)},{sent:true,messageId:'bad\n'}])
+      expect(()=>parseXboxMessageReceipt(value)).toThrow('could not be confirmed');
+  });
+  it('reconciles only the exact server ID from the outgoing side, not equal text or any fresh read',()=>{
+    const receipt={messageId:'accepted'};
+    const thread={xuid:'42',hasMore:false,messages:[message]};
+    expect(xboxSubmissionInHistory(receipt,thread)).toBe(false);
+    expect(xboxSubmissionInHistory(receipt,{...thread,messages:[{...message,id:'accepted'}]})).toBe(false);
+    expect(xboxSubmissionInHistory(receipt,{...thread,messages:[{...message,id:'other',sender:'43'}]})).toBe(false);
+    expect(xboxSubmissionInHistory(receipt,{...thread,messages:[{...message,id:'accepted',sender:'43'}]})).toBe(true);
+    expect(xboxSubmissionInHistory(receipt,{...thread,messages:[]})).toBe(false);
+  });
   it('keeps only allowlisted HTTPS profile pictures and never arbitrary remote URLs',()=>{
     for(const value of ['https://images-eds-ssl.xboxlive.com/image','https://gamerpic.xboxlive.com/avatar.png'])expect(xboxAvatarUrl(value)).toBe(value);
     for(const value of ['https://images-eds-ssl.xboxlive.com.evil.test/a','http://gamerpic.xboxlive.com/a','https://secret@gamerpic.xboxlive.com/a','file:///tmp/a','data:image/svg+xml,<svg/>','https://127.0.0.1/a','https://gamerpic.xboxlive.com:8443/a',null])expect(xboxAvatarUrl(value)).toBeUndefined();

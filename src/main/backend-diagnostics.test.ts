@@ -15,6 +15,24 @@ it('records social HTTP status and fixed failure stages without friends, message
   const wrong:unknown[]=[];new BackendDiagnosticReader('run',r=>wrong.push(r)).push(Buffer.from('NEXUS_SOCIAL_ERROR_V1 conversation-response\n'));expect(wrong).toEqual([]);
 });
 
+it('accepts only fixed receipt shape flags, never message IDs, payloads or raw error text',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-receipt-diagnostic-'));
+  try{
+    const log=new BackendDiagnostics(root),records:unknown[]=[];
+    const reader=new BackendDiagnosticReader('social',value=>{records.push(value);log.record(value);});
+    reader.push(Buffer.from('NEXUS_SOCIAL_RECEIPT_V1 1 1 2 0\n'));
+    for(const frame of ['1 1 4 0','1 1 true 0','1 1 2 0 PRIVATE_TOKEN','private-id 1 0 0'])
+      reader.push(Buffer.from('NEXUS_SOCIAL_RECEIPT_V1 '+frame+'\n'));
+    new BackendDiagnosticReader('run',value=>records.push(value)).push(Buffer.from('NEXUS_SOCIAL_RECEIPT_V1 1 1 2 0\n'));
+    expect(records).toEqual([{operation:'social',event:'diagnostic',stage:'send-receipt',socialReceipt:{hasMessageId:true,hasConversationId:true,nudge:'true',hasError:false}}]);
+    log.record({operation:'social',event:'diagnostic',stage:'send-receipt',socialReceipt:{hasMessageId:true,hasConversationId:true,nudge:'false',hasError:false,secret:'PRIVATE_TOKEN'} as never});
+    const {content}=await log.read();expect(content).not.toContain('PRIVATE_TOKEN');
+    expect(content.trim().split('\n').map(s=>JSON.parse(s).socialReceipt)).toEqual([
+      {hasMessageId:true,hasConversationId:true,nudge:'true',hasError:false},
+      {hasMessageId:true,hasConversationId:true,nudge:'false',hasError:false}]);
+  }finally{await fs.rm(root,{recursive:true,force:true});}
+});
+
 it('records only fixed keyring failure metadata, never collection paths or provider text (#329)', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-keyring-diagnostic-'));
   try {

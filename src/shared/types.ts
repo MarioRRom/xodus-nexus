@@ -362,7 +362,7 @@ export interface LauncherApi {
   onOpenFriends(callback: () => void): () => void;
   getXboxFriends(): Promise<import('./social.js').XboxFriend[]>;
   getXboxConversation(xuid: string): Promise<import('./social.js').XboxConversation>;
-  sendXboxMessage(xuid: string, text: string): Promise<void>;
+  sendXboxMessage(xuid: string, text: string): Promise<import('./social.js').XboxMessageReceipt>;
   closeXboxSocial(): Promise<void>;
   getSnapshot(): Promise<AppSnapshot>;
   refreshBackend(): Promise<BackendStatus>;

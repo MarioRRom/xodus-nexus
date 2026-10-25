@@ -1,6 +1,7 @@
 export interface XboxFriend { xuid: string; gamertag: string; presence: 'online' | 'offline' | 'unknown'; activity?: string; avatarUrl?: string }
 export interface XboxChatMessage { id: string; sender: string; at: string; text?: string; hidden: boolean }
 export interface XboxConversation { xuid: string; messages: XboxChatMessage[]; hasMore: boolean }
+export interface XboxMessageReceipt { messageId: string }
 export type SocialRequest = { op: 'friends' } | { op: 'conversation'; xuid: string } | { op: 'send'; xuid: string; text: string };
 
 export function xboxUserId(value: unknown): value is string {
@@ -10,6 +11,17 @@ export function xboxMessageText(value: unknown): value is string {
   return typeof value === 'string' && Boolean(value.trim()) && Array.from(value).length <= 256 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value);
 }
 const label = (s: unknown, max: number): s is string => typeof s === 'string' && Array.from(s).length <= max && !/[\x00-\x1f\x7f]/.test(s);
+
+/** An acceptance receipt is not proof of recipient delivery. Keep its real ID for reconciliation. */
+export function parseXboxMessageReceipt(value: unknown): XboxMessageReceipt {
+  const v=value as {sent?:unknown;messageId?:unknown}|null;
+  if(!v||v.sent!==true||!label(v.messageId,128)||!v.messageId.trim())
+    throw Error('Message delivery could not be confirmed. Refresh before trying again.');
+  return {messageId:v.messageId};
+}
+export function xboxSubmissionInHistory(receipt: XboxMessageReceipt, conversation: XboxConversation): boolean {
+  return conversation.messages.some(message=>message.id===receipt.messageId&&message.sender!==conversation.xuid);
+}
 
 export function xboxAvatarUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length > 4096) return;

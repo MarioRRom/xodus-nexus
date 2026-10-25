@@ -249,6 +249,16 @@ test('backend source and ordered patch hashes are locked', async () => {
   }
 });
 
+test('social send retains a genuine server receipt without changing authentication or automatically retrying', async () => {
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  assert.ok(lock.patches.findIndex(p=>p.file==='xodus-social-send-receipt.patch')>lock.patches.findIndex(p=>p.file==='xodus-social.patch'));
+  const patch=await fs.readFile('assets/xodus-social-send-receipt.patch','utf8');
+  assert.ok(patch.includes('"messageId":id'));
+  assert.ok(patch.includes('NEXUS_SOCIAL_RECEIPT_V1 {} {} {nudge} {}'));
+  assert.doesNotMatch(patch,/diff --git a\/.*(?:tokens\/|login\.rs|run\.rs|streaming\.rs|license\.rs)/);
+  assert.doesNotMatch(patch,/^\+.*(?:client\.(?:post|put|delete)|request\.send\(|sleep\()/m);
+});
+
 test('first wallet creation is explicit, native-prompt only and preserves existing collections', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   const index = lock.patches.findIndex(p => p.file === 'xodus-keyring-create.patch');

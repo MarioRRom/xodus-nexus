@@ -10,6 +10,7 @@ import { keyringSteps, keyringFailures, keyringBusErrors, type KeyringDiagnostic
 
 const operations = new Set(['keyring', 'account', 'profile', 'achievements', 'library', 'login', 'logout', 'streaming', 'download', 'license', 'run', 'resolve-package', 'service', 'probe', 'social']);
 const socialStages = new Set(['friends-http','conversation-http','send-http','conversation-response','friends-response',
+  'send-receipt',
   'privacy-or-access-denied','sign-in-required','rate-limited','not-found','service-unavailable','request-unconfirmed',
   'send-unconfirmed','invalid-response','response-size','response-read','account-changed']);
 const credentialStages = new Set(['keyring-unavailable', 'keyring-invalid-data', 'keyring-missing-data', 'keyring-write-verification', 'credential-io', 'device-authentication']);
@@ -29,7 +30,8 @@ const stages = new Set([
 ]);
 type Event = 'start' | 'exit' | 'spawn-error' | 'diagnostic' | 'validation';
 type Context = { launcher?: string; backend?: string; source?: string };
-type RecordData = { operation: string; event: Event; stage?: string; status?: number; skipped?: number; code?: number; serviceCode?: string; signal?: string; elapsedMs?: number; keyring?: KeyringDiagnostic };
+type SocialReceiptDiagnostic = {hasMessageId:boolean;hasConversationId:boolean;nudge:'absent'|'false'|'true'|'invalid';hasError:boolean};
+type RecordData = { operation: string; event: Event; stage?: string; status?: number; skipped?: number; code?: number; serviceCode?: string; signal?: string; elapsedMs?: number; keyring?: KeyringDiagnostic; socialReceipt?:SocialReceiptDiagnostic };
 const version = (value?: string) => value && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value) ? value : 'unknown';
 
 /** Allowlisted metadata only. Never persists child output, argv, auth frames or identifiers. */
@@ -86,6 +88,11 @@ export class BackendDiagnostics {
     if (data.serviceCode && /^[A-F0-9]{8}$/.test(data.serviceCode) && ['library', 'profile'].includes(data.operation)
       && ['ticket-refused', 'ticket-interaction-required'].includes(data.stage ?? '')) entry.serviceCode = data.serviceCode;
     if (data.signal && ['SIGINT', 'SIGTERM', 'SIGKILL', 'SIGSEGV', 'SIGABRT', 'SIGPIPE'].includes(data.signal)) entry.signal = data.signal;
+    if(data.operation==='social'&&data.stage==='send-receipt'&&data.socialReceipt){
+      const value=data.socialReceipt;
+      if(typeof value.hasMessageId==='boolean'&&typeof value.hasConversationId==='boolean'&&typeof value.hasError==='boolean'&&['absent','false','true','invalid'].includes(value.nudge))
+        entry.socialReceipt={hasMessageId:value.hasMessageId,hasConversationId:value.hasConversationId,nudge:value.nudge,hasError:value.hasError};
+    }
     if (Number.isFinite(data.elapsedMs)) entry.elapsedMs = Math.max(0, Math.min(86_400_000, Math.round(data.elapsedMs!)));
     if (data.operation === 'keyring' && data.event === 'diagnostic' && data.keyring
       && keyringSteps.includes(data.keyring.step) && keyringFailures.includes(data.keyring.failure)) {
@@ -139,6 +146,12 @@ export class BackendDiagnosticReader {
     const legacy = /^Account library unavailable \(([a-z-]+)\); credentials and installed games are unchanged\.$/.exec(line);
     const social = /^NEXUS_SOCIAL_DIAGNOSTIC_V1 ([a-z-]+) ([1-5][0-9]{2})$/.exec(line);
     const socialError = /^NEXUS_SOCIAL_ERROR_V1 ([a-z-]+)$/.exec(line);
+    const receipt = /^NEXUS_SOCIAL_RECEIPT_V1 ([01]) ([01]) ([0-3]) ([01])$/.exec(line);
+    if(receipt&&this.operation==='social'){
+      this.emitted++;
+      this.emit({operation:'social',event:'diagnostic',stage:'send-receipt',socialReceipt:{hasMessageId:receipt[1]==='1',hasConversationId:receipt[2]==='1',nudge:(['absent','false','true','invalid'] as const)[Number(receipt[3])],hasError:receipt[4]==='1'}});
+      return;
+    }
     if (social && this.operation === 'social' && ['friends-http','conversation-http','send-http'].includes(social[1])) { stage = social[1]; status = Number(social[2]); }
     else if (socialError && this.operation === 'social' && socialStages.has(socialError[1])) stage = socialError[1];
     else if (credential && credentialStages.has(credential[1])) stage = credential[1];

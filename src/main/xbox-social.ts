@@ -1,5 +1,5 @@
 import { spawnTracked } from './process.js';
-import { parseXboxFriends, parseXboxConversation, xboxMessageText, xboxUserId, xboxSocialErrors, type SocialRequest, type XboxConversation, type XboxFriend } from '../shared/social.js';
+import { parseXboxFriends, parseXboxConversation, parseXboxMessageReceipt, xboxMessageText, xboxUserId, xboxSocialErrors, type SocialRequest, type XboxConversation, type XboxFriend, type XboxMessageReceipt } from '../shared/social.js';
 
 type Identity = { account: string; binary: string };
 type Reader = (binary: string, request: SocialRequest, signal: AbortSignal) => Promise<string>;
@@ -65,13 +65,11 @@ export class XboxSocial {
     if(!xboxUserId(xuid))return Promise.reject(Error('Invalid Xbox user.'));
     return this.request({op:'conversation',xuid},v=>parseXboxConversation(v,xuid));
   }
-  async send(xuid:unknown,text:unknown):Promise<void>{
+  async send(xuid:unknown,text:unknown):Promise<XboxMessageReceipt>{
     if(!xboxUserId(xuid)||!xboxMessageText(text))throw Error('Enter a message of up to 256 characters.');
     if(this.sending)throw Error('A message is already being sent.');
     this.sending=true;
-    try{await this.request({op:'send',xuid,text},v=>{
-      if(!v||typeof v!=='object'||(v as {sent?:unknown}).sent!==true)throw Error('Message delivery could not be confirmed. Refresh before trying again.');
-    });}finally{this.sending=false;}
+    try{return await this.request({op:'send',xuid,text},parseXboxMessageReceipt);}finally{this.sending=false;}
   }
   private request<T>(request:SocialRequest,parse:(v:unknown)=>T):Promise<T>{
     const identity=this.identity();

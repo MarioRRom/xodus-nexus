@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { LoaderCircle, Send, UserRound, X } from 'lucide-react';
 import type { AppSnapshot } from '../shared/types';
-import { xboxAvatarUrl, xboxMessageText, xboxSocialError, type XboxConversation, type XboxFriend } from '../shared/social';
+import { xboxAvatarUrl, xboxMessageText, xboxSocialError, xboxSubmissionInHistory, type XboxConversation, type XboxFriend, type XboxMessageReceipt } from '../shared/social';
 import { FriendsRefresh } from './friends-refresh';
 import './friends.css';
 
@@ -24,6 +24,8 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
   const [sending,setSending]=useState(false);
   const [uncertain,setUncertain]=useState(false);
+  const [accepted,setAccepted]=useState(false);
+  const submission=useRef<{receipt:XboxMessageReceipt;text:string}>();
   const generation=useRef(0),pending=useRef(false),select=useRef('');
   const currentFriend=useRef<XboxFriend>(),lastFriends=useRef(0);
   const dialog=useRef<HTMLElement>(null),onClose=useRef(close);onClose.current=close;
@@ -46,7 +48,7 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
 
   useEffect(()=>{
     const active=++generation.current;
-    setFriends([]);setSelected(undefined);currentFriend.current=undefined;select.current='';setConversation(undefined);setDraft('');setUncertain(false);setError('');pending.current=false;setBusy(false);setSending(false);lastFriends.current=0;
+    setFriends([]);setSelected(undefined);currentFriend.current=undefined;select.current='';setConversation(undefined);setDraft('');setUncertain(false);setAccepted(false);submission.current=undefined;setError('');pending.current=false;setBusy(false);setSending(false);lastFriends.current=0;
     if(available){
       setBusy(true);pending.current=true;
       void window.launcher.getXboxFriends().then(value=>{
@@ -56,6 +58,15 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
     }
     return ()=>{generation.current++;void window.launcher.closeXboxSocial().catch(()=>{});};
   },[available,data.auth.username]);
+
+  function applyConversation(value:XboxConversation){
+    setConversation(value);
+    const sent=submission.current;
+    if(sent&&xboxSubmissionInHistory(sent.receipt,value)){
+      setDraft(draft=>draft===sent.text?'':draft);
+      submission.current=undefined;setAccepted(false);setUncertain(false);setError('');
+    }
+  }
 
   async function refresh(friend=currentFriend.current,automatic=false): Promise<boolean> {
     if(pending.current)return true;
@@ -71,7 +82,7 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
       }
       if(friend){
         const value=await window.launcher.getXboxConversation(friend.xuid);
-        if(generation.current===active&&select.current===friend.xuid){setConversation(value);setUncertain(false);}
+        if(generation.current===active&&select.current===friend.xuid)applyConversation(value);
       }else{
         if(!automatic||Date.now()-lastFriends.current>=60_000){
           const value=await window.launcher.getXboxFriends();if(generation.current===active){setFriends(value);lastFriends.current=Date.now();}
@@ -91,18 +102,20 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
   },[available,data.auth.username]);
   function choose(friend:XboxFriend){
     if(pending.current)return;
-    setSelected(friend);currentFriend.current=friend;select.current=friend.xuid;setConversation(undefined);setDraft('');setUncertain(false);void refresh(friend);
+    setSelected(friend);currentFriend.current=friend;select.current=friend.xuid;setConversation(undefined);setDraft('');setUncertain(false);setAccepted(false);submission.current=undefined;void refresh(friend);
   }
   async function send(event:FormEvent){
     event.preventDefault();if(!selected||pending.current||uncertain||!xboxMessageText(draft))return;
     const friend=selected,message=draft,active=generation.current;
     pending.current=true;setBusy(true);setSending(true);setError('');
     try{
-      await window.launcher.sendXboxMessage(friend.xuid,message);
+      const receipt=await window.launcher.sendXboxMessage(friend.xuid,message);
       if(generation.current!==active)return;
-      setDraft('');
-      try{const value=await window.launcher.getXboxConversation(friend.xuid);if(generation.current===active)setConversation(value);}
-      catch{if(generation.current===active)setError('Message sent. The conversation could not refresh.');}
+      // Keep the draft and block duplicates until this exact server ID appears.
+      // Service acceptance is not recipient delivery and must not create a fake message.
+      submission.current={receipt,text:message};setAccepted(true);setUncertain(true);
+      try{const value=await window.launcher.getXboxConversation(friend.xuid);if(generation.current===active)applyConversation(value);}
+      catch{if(generation.current===active)setError('Xbox accepted the message, but the conversation could not refresh.');}
     }catch{if(generation.current===active){setUncertain(true);setError('Message delivery could not be confirmed. Check the conversation before sending again.');}}
     finally{if(generation.current===active){pending.current=false;setBusy(false);setSending(false);}}
   }
@@ -139,6 +152,7 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
                 </article>)}
                 {conversation&&!conversation.messages.length?<p>No messages returned by Xbox.</p>:null}
               </div>
+              {uncertain?<p role="status">{accepted?'Xbox accepted the message, but it is not yet confirmed in the conversation. Your draft is kept.':'Sending could not be confirmed. Your draft is kept. Check the conversation before trying again.'}</p>:null}
               <form onSubmit={event=>void send(event)}><label htmlFor="xbox-message">Message</label><textarea id="xbox-message" value={draft} maxLength={512} onChange={event=>setDraft(event.target.value)} disabled={sending} />
                 <small>{Array.from(draft).length}/256 characters</small><button type="submit" disabled={busy||uncertain||!xboxMessageText(draft)}><Send />Send</button></form>
             </>:<div className="friends-empty"><UserRound aria-hidden="true" /><h3>Your conversations</h3><p>Select a friend to start chatting.</p></div>}
