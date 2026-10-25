@@ -6,6 +6,7 @@ import { installedEacRuntime } from './anti-cheat.js';
 import { prepareManagedPrefix } from './managed-prefix.js';
 import { systemGameLocale } from './game-locale.js';
 import { windowsGameLocale } from '../shared/game-language.js';
+import { prepareShaderCache } from './shader-cache.js';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -432,18 +433,13 @@ export async function prepareProtonRunner(
   const wineDllPath = [path.join(files, 'lib', 'vkd3d'), path.join(files, 'lib', 'wine')].join(':');
   const executablePath = [path.join(files, 'bin'), process.env.PATH ?? ''].filter(Boolean).join(':');
   const eacRuntime = await installedEacRuntime(steamRoot);
-  // Each game keeps its shader caches beside its prefix, as Proton keeps them per app.
-  // Games run from a temporary launch view, where vkd3d-proton would write its cache
-  // and lose it, and the drivers' shared default caches are too small for a large game,
-  // so it compiled its shaders again on every launch: a long first screen, or models
-  // missing until their shaders were ready.
-  const shaderCache = path.join(compatibilityDataPath, 'shadercache');
-  const shaderCaches = {
-    vkd3d: path.join(shaderCache, 'vkd3d-proton'),
-    nvidia: path.join(shaderCache, 'nvidia'),
-    mesa: path.join(shaderCache, 'mesa'),
-  };
-  for (const directory of Object.values(shaderCaches)) await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  // Keep the caches outside temporary launch views, separately for each prefix.
+  const shaderCaches = await prepareShaderCache(compatibilityDataPath);
+  const defaultEnvironment = (name: string, value: string) => [
+    `if [ "\${${name}+x}" != x ]; then`,
+    `  export ${name}=${shellQuote(value)}`,
+    'fi',
+  ];
   const runner = path.join(compatibilityDataPath, 'xodus-proton-wine');
   const temporary = `${runner}.tmp-${process.pid}`;
   const makeScript = (launchWine: string) => [
@@ -465,19 +461,17 @@ export async function prepareProtonRunner(
     `export PATH=${shellQuote(executablePath)}`,
     `export WINEDLLOVERRIDES='dxgi=n;d3d11=n;d3d10core=n;d3d9=n;d3d12=n;d3d12core=n${http2Runtime ? ';winhttp=b;libnghttp2=n' : ''}${dxvkRuntime ? ';d3d8=n' : ''}'`,
     "export WINE_LARGE_ADDRESS_AWARE='1'",
-    // Explicit cache settings win, as with Proton.
-    'if [ -z "${VKD3D_SHADER_CACHE_PATH:-}" ]; then',
-    `  export VKD3D_SHADER_CACHE_PATH=${shellQuote(shaderCaches.vkd3d)}`,
-    'fi',
-    'if [ -z "${__GL_SHADER_DISK_CACHE_PATH:-}" ]; then',
+    // Preserve each explicit setting, including disabled/empty values. Limits
+    // apply only when selecting our managed driver directory, not a custom one.
+    ...defaultEnvironment('VKD3D_SHADER_CACHE_PATH', shaderCaches.vkd3d),
+    'if [ "${__GL_SHADER_DISK_CACHE_PATH+x}" != x ]; then',
     `  export __GL_SHADER_DISK_CACHE_PATH=${shellQuote(shaderCaches.nvidia)}`,
-    "  export __GL_SHADER_DISK_CACHE='1'",
-    // The game's own directory is never trimmed to the driver's default size.
-    "  export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP='1'",
+    ...defaultEnvironment('__GL_SHADER_DISK_CACHE', '1'),
+    ...defaultEnvironment('__GL_SHADER_DISK_CACHE_SIZE', '2147483648'),
     'fi',
-    'if [ -z "${MESA_SHADER_CACHE_DIR:-}" ]; then',
+    'if [ "${MESA_SHADER_CACHE_DIR+x}" != x ]; then',
     `  export MESA_SHADER_CACHE_DIR=${shellQuote(shaderCaches.mesa)}`,
-    "  export MESA_SHADER_CACHE_MAX_SIZE='10G'",
+    ...defaultEnvironment('MESA_SHADER_CACHE_MAX_SIZE', '2G'),
     'fi',
     // Use Steam's genuine compatibility bridge when installed. Never force a
     // particular game to load it or replace an explicit user configuration.

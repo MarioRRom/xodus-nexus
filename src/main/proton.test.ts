@@ -208,7 +208,7 @@ describe('prepareProtonRunner', () => {
     await mkdir(path.join(files, 'share/default_pfx'), { recursive: true });
     await mkdir(system32, { recursive: true });
     for (const dll of ['libvkd3d-utils-1.dll', 'dxgi.dll', 'd3d12.dll']) await writeFile(path.join(system32, dll), 'ready');
-    await writeFile(wine, '#!/bin/sh\nprintf \'%s\\n\' "$VKD3D_SHADER_CACHE_PATH" "$__GL_SHADER_DISK_CACHE_PATH" "$__GL_SHADER_DISK_CACHE" "$__GL_SHADER_DISK_CACHE_SKIP_CLEANUP" "$MESA_SHADER_CACHE_DIR" "$MESA_SHADER_CACHE_MAX_SIZE"\n');
+    await writeFile(wine, '#!/bin/sh\nprintf \'%s\\n\' "$VKD3D_SHADER_CACHE_PATH" "$__GL_SHADER_DISK_CACHE_PATH" "$__GL_SHADER_DISK_CACHE" "$__GL_SHADER_DISK_CACHE_SKIP_CLEANUP" "$MESA_SHADER_CACHE_DIR" "$MESA_SHADER_CACHE_MAX_SIZE" "$__GL_SHADER_DISK_CACHE_SIZE"\n');
     await chmod(wine, 0o700);
     await writeFile(path.join(files, '../proton'), '#!/bin/sh\nexit 0\n');
     await chmod(path.join(files, '../proton'), 0o700);
@@ -216,10 +216,10 @@ describe('prepareProtonRunner', () => {
     const cache = path.join(compat, 'shadercache');
     for (const name of ['vkd3d-proton', 'nvidia', 'mesa']) expect((await stat(path.join(cache, name))).isDirectory()).toBe(true);
     const clean = { ...process.env };
-    for (const name of ['VKD3D_SHADER_CACHE_PATH', '__GL_SHADER_DISK_CACHE_PATH', 'MESA_SHADER_CACHE_DIR']) delete clean[name];
+    for (const name of ['VKD3D_SHADER_CACHE_PATH', '__GL_SHADER_DISK_CACHE_PATH', '__GL_SHADER_DISK_CACHE', '__GL_SHADER_DISK_CACHE_SKIP_CLEANUP', '__GL_SHADER_DISK_CACHE_SIZE', 'MESA_SHADER_CACHE_DIR', 'MESA_SHADER_CACHE_MAX_SIZE']) delete clean[name];
     const defaults = await execFile(runner!.command, [], { env: clean });
     expect(defaults.stdout.trim().split('\n')).toEqual([
-      path.join(cache, 'vkd3d-proton'), path.join(cache, 'nvidia'), '1', '1', path.join(cache, 'mesa'), '10G',
+      path.join(cache, 'vkd3d-proton'), path.join(cache, 'nvidia'), '1', '', path.join(cache, 'mesa'), '2G', '2147483648',
     ]);
     const explicit = await execFile(runner!.command, [], { env: { ...clean, VKD3D_SHADER_CACHE_PATH: '/mine/vkd3d', __GL_SHADER_DISK_CACHE_PATH: '/mine/nv', MESA_SHADER_CACHE_DIR: '/mine/mesa' } });
     expect(explicit.stdout.trim().split('\n').filter((line, index) => index === 0 || index === 1 || index === 4)).toEqual(['/mine/vkd3d', '/mine/nv', '/mine/mesa']);
