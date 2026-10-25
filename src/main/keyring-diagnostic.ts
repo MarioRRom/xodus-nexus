@@ -24,6 +24,8 @@ export class KeyringMetadataError extends Error {
 export function keyringCommandFailure(error: { code?: string | number | null; killed?: boolean }, stderr: string): KeyringMetadataError {
   if (error.code === 'ENOENT') return new KeyringMetadataError('client-missing');
   if (error.code === 'EACCES') return new KeyringMetadataError('client-permission');
+  if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return new KeyringMetadataError('invalid-response');
+  if (error.code === 'ETIMEDOUT') return new KeyringMetadataError('timeout');
   if (error.killed) return new KeyringMetadataError('timeout');
   // busctl versions may include the structured D-Bus name in their diagnostic.
   // Do not invent one from localized prose or retain any adjacent text.

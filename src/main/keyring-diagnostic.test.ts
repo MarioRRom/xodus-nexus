@@ -6,6 +6,8 @@ describe('private keyring failure diagnostics (#329)', () => {
   it.each([
     ['ENOENT', false, '', 'client-missing'], ['EACCES', false, '', 'client-permission'],
     [undefined, true, 'private wallet data', 'timeout'],
+    ['ERR_CHILD_PROCESS_STDIO_MAXBUFFER', true, 'private wallet data', 'invalid-response'],
+    ['ETIMEDOUT', false, 'private wallet data', 'timeout'],
     [1, false, 'Call failed: Connection timed out', 'timeout'],
     [1, false, 'org.freedesktop.DBus.Error.NoReply: private text', 'timeout'],
     [1, false, 'org.freedesktop.DBus.Error.AccessDenied: private text', 'dbus-error'],
