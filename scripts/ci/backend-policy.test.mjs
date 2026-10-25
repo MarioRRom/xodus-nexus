@@ -8,6 +8,30 @@ import path from 'node:path';
 import os from 'node:os';
 import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
 
+test('Xbox friends/chat is explicit and account-bound without modifying login, saves or license paths', async () => {
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(p=>p.file==='xodus-social.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.ok(lock.patches.findIndex(p=>p.file===entry.file)>lock.patches.findIndex(p=>p.file==='xodus-session-recovery.patch'));
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(m=>m[1]).sort(),[
+    'crates/xodus-cli/src/commands.rs','crates/xodus-cli/src/commands/social.rs','crates/xodus-cli/src/main.rs',
+  ]);
+  for(const name of ['social_input_rejects_arbitrary_endpoints_and_invalid_ids_before_authentication',
+    'social_plans_use_only_exact_https_hosts_and_no_retry_or_identity_impersonation',
+    'social_friends_keep_unknown_presence_honest_and_drop_private_server_fields',
+    'social_chat_preserves_safety_filters_and_never_fetches_media',
+    'social_send_success_requires_actual_service_acknowledgement',
+    'social_http_uses_one_explicit_request_and_honors_denials_without_retry'])assert.ok(patch.includes(name),name);
+  const production=patch.split('+#[cfg(test)]')[0];
+  assert.ok(production.includes('super::profile::xbox_session(tokens)'));
+  assert.ok(production.includes('username != account'));
+  assert.ok(production.includes('16385'));
+  assert.ok(production.includes('unsuitableFor'));
+  assert.doesNotMatch(production,/\.read_to_string\(|allow_invalid|danger_accept|mark.read|readHorizon|\.delete\(|ensure_device_credentials|NEXUS_.*token/i);
+  assert.ok((await fs.readFile('scripts/build-backend.mjs','utf8')).includes("'social'"));
+});
+
 test('bundle resolution follows declared contents and preserves contributor regressions (#273, #298)', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   const entry = lock.patches.find(p => p.file === 'xodus-bundle-membership.patch');
@@ -271,7 +295,9 @@ test('backend build runs account-free credential persistence regressions', async
 
 test('authenticated account metadata remains bound, additive and covered by backend regressions', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
-  assert.equal(lock.patches.at(-1).file, 'xodus-authenticated-account-metadata.patch');
+  const metadata=lock.patches.findIndex(p=>p.file==='xodus-authenticated-account-metadata.patch');
+  assert.ok(metadata>lock.patches.findIndex(p=>p.file==='xodus-content-device-limit.patch'));
+  assert.equal(lock.patches[metadata+1].file,'xodus-social.patch');
   const patch = await fs.readFile('assets/xodus-authenticated-account-metadata.patch', 'utf8');
   for (const expected of ['get_user_sts_session', 'self.user_session()?', 'bound_ids',
     'credential_account_metadata_snapshot_is_atomic_and_logout_removes_it',

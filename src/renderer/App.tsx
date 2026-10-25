@@ -3,7 +3,7 @@ import {
   ArrowDownToLine, Check, ChevronRight, CircleAlert, CircleUserRound,
   Clock3, Cog, Download, FolderOpen, Gamepad2, Github, HardDrive, Home, Library,
   LoaderCircle, LogIn, MoreHorizontal, PackageCheck, Pause, Play, Plus, RefreshCw, Rocket, Search, Settings2,
-  Store, Terminal, Trash2, X,
+  Store, Terminal, Trash2, UsersRound, X,
 } from 'lucide-react';
 import type { AccountLibraryPage, AppSnapshot, CatalogProduct, CatalogSearchResult, DiagnosticLog, Game, GameContentPlan, GameLaunchOptions, Page, Settings } from '../shared/types';
 import { estimateTimeRemaining } from '../shared/utils';
@@ -22,6 +22,7 @@ import { GameLanguage } from './GameLanguage';
 import { DownloadCancelDialog } from './DownloadCancelDialog';
 import { KeyringSetup } from './KeyringSetup';
 import { DiagnosticReportButton } from './DiagnosticReport';
+import { Friends } from './Friends';
 import type { DownloadCancelOptions } from '../shared/types';
 export type { LibraryFilters } from './library-preferences';
 
@@ -93,7 +94,7 @@ function AccountAvatar({ auth, large = false }: { auth: AppSnapshot['auth']; lar
   </div>;
 }
 
-export function TopStatus({ data, go }: { data: AppSnapshot; go: (page: Page) => void }) {
+export function TopStatus({ data, go, openFriends }: { data: AppSnapshot; go: (page: Page) => void; openFriends?: () => void }) {
   const restart = data.launcherUpdate?.restartRequired;
   const updates = [
     data.launcherUpdate?.latestVersion && !restart ? `Launcher ${data.launcherUpdate.latestVersion}` : '',
@@ -102,6 +103,7 @@ export function TopStatus({ data, go }: { data: AppSnapshot; go: (page: Page) =>
   ].filter(Boolean);
   const updateTitle = [restart ? 'Restart to finish launcher update.' : '', updates.length ? `Available updates: ${updates.join(', ')}` : ''].filter(Boolean).join(' ');
   return <div className="top-status">
+    {openFriends?<button title="Xbox friends and chat" aria-label="Xbox friends and chat" onClick={openFriends}><UsersRound /></button>:null}
     {updates.length || restart ? <button className="update-notice" title={updateTitle} aria-label={updateTitle} onClick={() => go('settings')}><ArrowDownToLine /><strong>{restart ? 'Restart available' : 'Update available'}</strong></button> : null}
     <StatusDot tone={data.backend.available ? 'green' : 'red'} /><span>{data.backend.available ? 'Xodus ready' : 'Backend offline'}</span><button title="Settings" onClick={() => go('settings')}><Settings2 /></button>
   </div>;
@@ -1030,6 +1032,7 @@ export default function App() {
   // App stays mounted while pages change, unlike LibraryPage/AccountGames.
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(() => loadLibraryFilters());
   const [librarySelection, setLibrarySelection] = useState<{ id: string }>();
+  const [friendsOpen,setFriendsOpen]=useState(false);
 
   useEffect(() => {
     void window.launcher.getSnapshot().then((value) => { setData(value); setLoading(false); }).catch((error) => { setToast({ kind: 'error', message: errorMessage(error) }); setLoading(false); });
@@ -1067,13 +1070,14 @@ export default function App() {
     <Sidebar data={data} page={page} go={setPage} openGame={openLibraryGame} />
 
     <section className="content-shell">
-      <header className="topbar"><GlobalSearch games={data.games} page={page} query={search} change={setSearch} submit={value => { setSubmittedSearch(value); setPage('store'); }} select={openLibraryGame} /><TopStatus data={data} go={setPage} /></header>
+      <header className="topbar"><GlobalSearch games={data.games} page={page} query={search} change={setSearch} submit={value => { setSubmittedSearch(value); setPage('store'); }} select={openLibraryGame} /><TopStatus data={data} go={setPage} openFriends={()=>setFriendsOpen(true)} /></header>
       <div className="page-scroll">{page === 'home' ? <HomePage data={data} go={setPage} action={action} /> : null}{page === 'store' ? <StorePage data={data} toast={setToast} go={setPage} initialQuery={submittedSearch} /> : null}{page === 'library' ? <LibraryPage data={data} toast={setToast} filters={libraryFilters} onFiltersChange={changeLibraryFilters} selection={librarySelection} /> : null}{page === 'downloads' ? <DownloadsPage data={data} toast={setToast} /> : null}{page === 'settings' ? <SettingsPage data={data} toast={setToast} /> : null}</div>
     </section>
     {toast ? <div className={`toast ${toast.kind}`}>{toast.kind === 'success' ? <Check /> : toast.kind === 'error' ? <CircleAlert /> : <Terminal />}<span>{toast.message}</span><button onClick={() => setToast(undefined)}><X /></button></div> : null}
-  </div><GamepadNavigation back={() => setPage('home')} page={delta => setPage(current => {
+    {friendsOpen?<Friends key={JSON.stringify([data.auth.username,data.backend.binaryPath])} data={data} close={()=>setFriendsOpen(false)} />:null}
+  </div><GamepadNavigation back={() => friendsOpen?setFriendsOpen(false):setPage('home')} page={delta => { if(friendsOpen)return;setPage(current => {
     const pages: Page[] = ['home', 'library', 'store'];
     const index = pages.indexOf(current);
     return index === -1 ? pages[delta > 0 ? 0 : pages.length - 1] : pages[(index + delta + pages.length) % pages.length];
-  })} /></PackageInstallProvider></ConfirmationProvider>;
+  });}} /></PackageInstallProvider></ConfirmationProvider>;
 }

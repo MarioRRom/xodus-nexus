@@ -63,6 +63,12 @@ Flatpak version available through Discover. Other browsers are not supported.
 - **Settings → Downloads** sets a combined game download speed limit in MiB/s (0 means unlimited). A supporting Nexus backend is required; saving the limit also applies it to active downloads.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
 
+## Xbox friends and chat (experimental)
+
+Use the friends button in the top bar to open your Xbox friends list and text conversations. This requires a compatible Nexus backend and your account's communication permissions. Refresh the view to load new messages. If delivery cannot be confirmed, refresh the conversation before sending again.
+
+Game invitations and an in-game overlay are not available yet. Launcher chat does not change a game's online status.
+
 ## Wallet setup and unlocking
 
 - If the service is stopped, use **Start service**. Supported KDE wallets should also start automatically when Nexus opens in Game Mode.

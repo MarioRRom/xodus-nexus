@@ -353,6 +353,10 @@ export interface AccountLibraryPage {
 }
 
 export interface LauncherApi {
+  getXboxFriends(): Promise<import('./social.js').XboxFriend[]>;
+  getXboxConversation(xuid: string): Promise<import('./social.js').XboxConversation>;
+  sendXboxMessage(xuid: string, text: string): Promise<void>;
+  closeXboxSocial(): Promise<void>;
   getSnapshot(): Promise<AppSnapshot>;
   refreshBackend(): Promise<BackendStatus>;
   checkBackendUpdate(): Promise<BackendStatus>;

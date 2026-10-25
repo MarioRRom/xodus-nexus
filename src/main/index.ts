@@ -60,6 +60,7 @@ import { gameSteamPortrait, nexusSteamArtwork } from './steam-artwork.js';
 import { addLiveSteamShortcut } from './steam-live.js';
 import { DownloadCompletionNotifications } from './download-notifications.js';
 import { KeyringSupport } from './keyring.js';
+import { XboxSocial } from './xbox-social.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
@@ -106,6 +107,12 @@ const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProdu
 const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
+const xboxSocial = new XboxSocial(() => {
+  const status = backend?.current;
+  return !shutdownStarted && !authState.running && authState.stored === true && authState.username
+    && status?.available && status.binaryPath && status.capabilities.commands.includes('social')
+    ? { account: authState.username, binary: status.binaryPath } : undefined;
+});
 const keyringSupport = new KeyringSupport(process.env, undefined, process.platform, undefined, {
   diagnostic: value => backendDiagnostic({ operation: 'keyring', event: 'diagnostic', keyring: value, elapsedMs: value.elapsedMs }),
   canCreate: () => Boolean(backend?.current.capabilities.commands.includes('keyring-create')),
@@ -353,6 +360,7 @@ async function refreshAccount(emit = true, afterAuth = false): Promise<AuthStatu
     }
     return next;
   }, async next => {
+    if (authState.username !== next.username || next.stored !== true) xboxSocial.close();
     authState = { ...authState, ...next };
     accountLibrary.select(authState.stored === true ? authState.username : undefined,
       status.capabilities.library ? status.binaryPath : undefined, currentMarket());
@@ -420,6 +428,7 @@ async function runAuth(command: 'login' | 'logout'): Promise<void> {
   accountLibrary.reset();
   gameActivities.select();
   gameAchievements.select();
+  xboxSocial.close();
   authState = { ...authState, running: true, lastResult: undefined };
   emitSnapshot();
   try {
@@ -1259,6 +1268,10 @@ function registerIpc(): void {
     emitSnapshot();
   });
   ipcMain.handle('account-refresh', () => refreshAccount());
+  ipcMain.handle('xbox-friends', () => xboxSocial.friends());
+  ipcMain.handle('xbox-conversation', (_event, xuid: unknown) => xboxSocial.conversation(xuid));
+  ipcMain.handle('xbox-send-message', (_event, xuid: unknown, text: unknown) => xboxSocial.send(xuid, text));
+  ipcMain.handle('xbox-social-close', () => xboxSocial.close());
   ipcMain.handle('keyring-check', () => keyringSupport.check());
   ipcMain.handle('keyring-start', async () => {
     ensureIdle();
@@ -1863,16 +1876,18 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => gameDisplay.stop());
 
 app.on('before-quit', (event) => {
+  xboxSocial.close();
   walletUnlocker.cancel();
   installQueue.stop();
   installQueue.stop();
   accountLibrary.reset();
   accountProfile?.cancel();
   accountRefresh.invalidate();
-  if (shutdownStarted || (!walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
+  if (shutdownStarted || (!xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
   event.preventDefault();
   shutdownStarted = true;
   void (async () => {
+    await xboxSocial.settled();
     await walletUnlocker.stop();
     gameUpdateController?.abort();
     await gameUpdateJob?.catch(() => {});

@@ -1,0 +1,27 @@
+.friends-dialog { width:min(880px,94vw); max-height:90vh; display:flex; flex-direction:column; overflow:auto; background:var(--panel,#202428); border:1px solid #485058; border-radius:8px; padding:22px; box-shadow:0 20px 80px #0009; }
+.friends-dialog>header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.friends-dialog>header h2 { margin:0; }
+.friends-dialog button { display:inline-flex; gap:8px; align-items:center; border:1px solid #51575f; border-radius:4px; padding:8px 12px; background:#30353b; color:var(--text,#f1f2f4); font:inherit; font-size:12px; cursor:pointer; }
+.friends-dialog button:hover:not(:disabled) { background:#41474e; }
+.friends-dialog button:disabled { opacity:.5; cursor:default; }
+.friends-dialog>header button { border:0; padding:6px; background:transparent; }
+.friends-dialog svg { width:18px; height:18px; }
+.friends-tools { display:flex; align-items:center; gap:16px; margin:16px 0; }
+.friends-tools>span { display:flex; align-items:center; gap:8px; }
+.friends-columns { display:grid; grid-template-columns:minmax(170px,1fr) minmax(250px,2fr); gap:18px; min-height:350px; }
+.friends-columns>aside { overflow:auto; max-height:450px; border-right:1px solid #485058; padding-right:12px; }
+.friends-columns>aside button { display:flex; flex-direction:column; align-items:flex-start; width:100%; text-align:left; margin-bottom:8px; overflow-wrap:anywhere; border-color:transparent; background:transparent; padding:10px; gap:5px; }
+.friends-columns>aside button.selected { border-color:#638456; background:#2d392a; }
+.friends-dialog small,.friends-limitation { color:#b0b8c0; }
+.friends-chat { min-width:0; display:flex; flex-direction:column; }
+.friends-chat h3 { margin:0 0 12px; }
+.friends-messages { overflow:auto; min-height:180px; max-height:300px; flex:1; }
+.friends-messages article { padding:10px 0; border-bottom:1px solid #ffffff12; }
+.friends-messages article p { white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0; }
+.friends-chat form { display:grid; grid-template-columns:1fr auto; gap:8px; margin-top:12px; }
+.friends-chat label,.friends-chat textarea { grid-column:1/-1; }
+.friends-chat textarea { min-height:70px; width:100%; resize:vertical; border:1px solid #5b626b; border-radius:4px; background:#1c1f23; color:#f4f4f4; padding:9px 10px; font:inherit; font-size:13px; }
+.friends-chat form button { background:#348b32; border-color:#348b32; }
+.friends-limitation { font-size:12px; margin-bottom:0; }
+.friends-error { color:#f1bf85; }
+@media(max-width:650px) { .friends-columns { grid-template-columns:1fr; } .friends-columns>aside { max-height:130px; border-right:0; } }

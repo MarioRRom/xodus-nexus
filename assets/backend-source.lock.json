@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v46",
+  "patchId": "linux-run-v47",
   "compatibility": "linux-run-v25",
   "patches": [
     { "file": "xodus-linux-run.patch", "sha256": "68f260ec2c6e9264c47ed1a650868511f5412a756725d4000a865804f4712e8b" },
@@ -52,6 +52,7 @@
     { "file": "xodus-durable-content.patch", "sha256": "3d2310fffb020396a68b99e217a81ae1b82920bfa425bf6fd8024c9ea1af6a55" },
     { "file": "xodus-conditional-entitlements.patch", "sha256": "8acc3e079d6f8242d364e5d6cd88bddda7004016c12ed4c48bb353499b95f347" },
     { "file": "xodus-content-device-limit.patch", "sha256": "d6a7115a6efd5d2acaf600590c61e38802632c7afad083639884212984fbccb7" },
-    { "file": "xodus-authenticated-account-metadata.patch", "sha256": "1c3845c44efcb4afa49d6618b89e15f39e06804182f281a975f2df14e5a2164d" }
+    { "file": "xodus-authenticated-account-metadata.patch", "sha256": "1c3845c44efcb4afa49d6618b89e15f39e06804182f281a975f2df14e5a2164d" },
+    { "file": "xodus-social.patch", "sha256": "c191d358f4d38e604f7a971f83fa8b01cafb86896f6ff4570f92fb9a5f341697" }
   ]
 }
