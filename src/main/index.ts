@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AppSnapshot, AuthStatus, DownloadTask, Game, GameLaunchOptions, GameOperation, GameUpdate, InstallRequest, Settings } from '../shared/types.js';
 import { downloadFailure, safeProductId } from '../shared/utils.js';
+import { contentLicenseFailure } from '../shared/content-license.js';
 import { downloadLimitArgs, downloadLimitKiB } from '../shared/download-bandwidth.js';
 import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-bandwidth.js';
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
@@ -17,13 +18,13 @@ import { inspectGameDirectory, StateStore } from './store.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { CatalogService } from './catalog.js';
-import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
+import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
 import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION, versionAtLeast } from './vc-runtime.js';
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
 import { deleteGameDirectory } from './game-delete.js';
 import { spawnGameProcess, type GameProcess } from './game-process.js';
-import { gameLocaleEnvironment, manifestLocales, manifestTitleId, supportedGameLocale } from './game-locale.js';
+import { gameLocaleEnvironment, installedGameLocales, installedGameTitleId, supportedGameLocale } from './game-locale.js';
 import { antiCheatEnvironment } from './anti-cheat.js';
 import { gameLaunchArguments, preparedGameWine } from './game-launch.js';
 import { prepareGameWrapper, type GameWrapper } from './game-wrapper.js';
@@ -50,7 +51,7 @@ import { startAuthTransport } from './auth-transport.js';
 import { authViewFactory } from './auth-window.js';
 import { browserAuthViewFactory } from './auth-browser.js';
 import { fallbackAuthViewFactory } from './auth-fallback.js';
-import { installSelection, readInstallPlan } from './install-plan.js';
+import { contentParentForChoice, InstallPlans, installSelection, readInstallPlan } from './install-plan.js';
 import { adoptLauncherFonts } from './launcher-fonts.js';
 import { externalLauncherEnvironment } from './launcher-environment.js';
 import { openDesktopTarget } from './desktop-open.js';
@@ -102,6 +103,7 @@ const catalog = new CatalogService();
 const gameActivities = new GameActivities();
 const gameAchievements = new GameAchievementsReader();
 const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market));
+const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
 const keyringSupport = new KeyringSupport(process.env, undefined, process.platform, undefined, {
@@ -457,14 +459,19 @@ function requestAuth(command: 'login' | 'logout'): Promise<void> {
   void job.then(clear, clear); return job;
 }
 
-async function startInstall(request: InstallRequest, updateGame?: Game): Promise<string> {
+async function startInstall(request: InstallRequest, updateGame?: Game, resumed?: DownloadTask): Promise<string> {
   ensureIdle(updateGame ? undefined : 'install');
   preparingInstall = true;
-  try { await prepareSystemWallet(); return await prepareInstall(request, updateGame); }
+  try { await prepareSystemWallet(); return await prepareInstall(request, updateGame, undefined, resumed); }
   finally { preparingInstall = false; }
 }
 
-function contentManager(): GameContent { return new GameContent(path.dirname(store.settings.runtimeRoot)); }
+let managedContent: { root: string; manager: GameContent } | undefined;
+function contentManager(): GameContent {
+  const root = path.dirname(store.settings.runtimeRoot);
+  if (!managedContent || managedContent.root !== root) managedContent = { root, manager: new GameContent(root) };
+  return managedContent.manager;
+}
 async function gameContent(id: string) {
   const game = store.games.find(entry => entry.id === id);
   if (!game) throw Error('Game not found.');
@@ -480,7 +487,10 @@ async function gameContent(id: string) {
 async function installGameContent(id: string, productId: string): Promise<string> {
   ensureIdle();
   preparingContent = true;
-  try {
+  try { return await prepareContentInstall(id, productId); }
+  finally { preparingContent = false; preparingInstall = false; }
+}
+async function prepareContentInstall(id: string, productId: string, selectedContentId?: string): Promise<string> {
     const manager = contentManager();
     const { plan, packages } = await gameContent(id);
     if (shutdownStarted) throw Error('The launcher is closing.');
@@ -488,17 +498,17 @@ async function installGameContent(id: string, productId: string): Promise<string
     const game = store.games.find(entry => entry.id === id);
     const item = plan.items.find(item => item.productId === productId);
     const pkg = packages.find(pkg => pkg.productId === productId);
-    if (!game || !item?.access || !pkg || !['available', 'installed'].includes(item.status)) throw Error('No supported licensed content package was verified.');
+    if (!game || !item || (!item.access && item.status !== 'verify') || !pkg || !['available', 'installed', 'verify'].includes(item.status)) throw Error('No supported content package with a verified license or active source offer was found.');
+    if (selectedContentId && pkg.contentId !== selectedContentId) throw Error('The add-on package changed. Check content again.');
     // Downloads use the existing genuine license-checked backend, not catalog URLs.
     requireBackend('streaming');
     if (await backend.externalDownloadRunning()) throw Error('Another Xodus download is running.');
-    const destination = await manager.prepare(game, pkg);
+    const destination = await manager.prepare(game, pkg, currentMarket());
     preparingInstall = true;
     return await prepareInstall({ productId, title: `${game.title}: ${item.title}`, destination }, undefined, { game, pkg, manager });
-  } finally { preparingContent = false; preparingInstall = false; }
 }
 
-async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }): Promise<string> {
+async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }, resumed?: DownloadTask): Promise<string> {
   const binary = requireBackend('streaming');
   const productId = safeProductId(request.productId);
   const market = currentMarket();
@@ -506,13 +516,14 @@ async function prepareInstall(request: InstallRequest, updateGame?: Game, conten
   if (!content) {
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings before installing games.');
     if (request.selectionMarket !== undefined && request.selectionMarket !== market) throw Error('Store market changed. Choose the installation package again.');
-    if (request.selectedContentId !== undefined) {
-      if (request.selectionMarket !== market || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(request.selectedContentId)) throw Error('Invalid installation package selection.');
-      // Streaming re-resolves membership before license/download. Do not make
-      // a redundant third catalog round trip here after the dialog preflight.
-      selectedContentId = request.selectedContentId;
-    } else selectedContentId = installSelection(await readInstallPlan(binary, productId, market));
+    if (request.selectedContentId !== undefined && request.selectionMarket !== market) throw Error('Invalid installation package selection.');
+    const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
+    selectedContentId = installSelection(plan, request.selectedContentId);
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try installing again.');
+    const choice = plan.choices.find(choice => choice.supported && choice.contentId === selectedContentId)!;
+    if (updateGame && choice.kind === 'Durable') throw Error('An add-on cannot replace the base game. Use Manage content.');
+    const parent = contentParentForChoice(choice, store.games);
+    if (parent) return prepareContentInstall(parent, choice.productId, selectedContentId);
   }
   const activeTasks = store.downloads.filter(task => ['running', 'queued', 'paused'].includes(task.status));
   if (activeTasks.length >= 100) throw Error('The install queue is full. Cancel an installation before adding another.');
@@ -551,6 +562,7 @@ async function prepareInstall(request: InstallRequest, updateGame?: Game, conten
     log: [],
     startedAt: new Date().toISOString(),
   };
+  if (resumed) await downloadCleanup.inheritResume(resumed, task);
   await store.addDownload(task);
   void enrichDownloadCovers([task], market).catch(() => { /* Artwork is optional. */ });
   const identity = `${authState.username}:${binary}:${market}`;
@@ -675,7 +687,7 @@ async function runDownload(task: DownloadTask, binary: string, market: string, u
           await store.patchGame(updateGame.id, { installState: inspected.installState, installMessage: inspected.installMessage, antiCheat: inspected.antiCheat, vcRedistEncrypted: inspected.vcRedistEncrypted, coverDataUrl: inspected.coverDataUrl, storeId: inspected.storeId ?? updateGame.storeId, installedVersion: inspected.installedVersion, packageName: inspected.packageName });
           delete gameUpdates[updateGame.id];
         }
-        else await store.upsertGame(inspected);
+        else await store.upsertGame({ ...inspected, offerProductId: /^[A-Z0-9]{12}$/.test(task.productId) ? task.productId : undefined });
       } catch { /* Some packages do not expose metadata yet. */ }
     }
     if (task.status === 'complete') await downloadCleanup.complete(task);
@@ -793,18 +805,16 @@ async function gameLaunchOptions(id: string): Promise<GameLaunchOptions> {
     cloudSaves: previewRuntime && serviceAvailable,
     cloudReason: !previewRuntime ? 'The selected Wine runtime does not include the cloud-save preview.' : !serviceAvailable ? 'This Xodus backend has no xodus-service.' : undefined,
     vcInstall: protonAvailable,
-    vcReason: protonAvailable ? undefined : 'VC++ installation requires a full Xodus Proton distribution.',
+    vcReason: protonAvailable ? undefined : 'VC++ installation requires a full Proton runtime.',
   };
 }
 
 async function gameLocales(game: Game): Promise<string[]> {
-  const xml = await fs.readFile(path.join(game.path, 'MicrosoftGame.config'), 'utf8').catch(() => '');
-  return manifestLocales(xml);
+  return installedGameLocales(game.path);
 }
 
 async function gameTitleId(game: Game): Promise<string | undefined> {
-  const xml = await fs.readFile(path.join(game.path, 'MicrosoftGame.config'), 'utf8').catch(() => '');
-  return manifestTitleId(xml);
+  return installedGameTitleId(game.path);
 }
 
 async function launchGame(id: string): Promise<void> {
@@ -834,10 +844,10 @@ async function prepareGameLaunch(id: string): Promise<void> {
   emitSnapshot();
   const binary = requireBackend('run');
   if (inspected.installState !== 'ready') throw new Error(inspected.installMessage ?? 'The installation is not ready for Xodus run.');
-  const locale = supportedGameLocale(game.locale ?? '', await gameLocales(game));
-  const titleId = await gameTitleId(game);
+  const locale = supportedGameLocale(game.locale ?? '');
+  const titleId = await gameTitleId(game).catch(() => undefined);
   const wine = selectedWinePath(store.settings.winePath, store.settings.runtimeRoot, runtime.current.winePath);
-  if (!wine) throw new Error('Select a Wine/Xodus Proton binary in Settings.');
+  if (!wine) throw new Error('Select a Wine / Proton binary in Settings.');
   try { await fs.access(wine, constants.X_OK); }
   catch { throw new Error(`The selected Wine runtime is unavailable: ${wine}. Select or reinstall Xodus Runtime in Settings.`); }
   const cloudRuntime = await cloudSaveRuntime(wine);
@@ -904,15 +914,25 @@ async function prepareGameLaunch(id: string): Promise<void> {
     const environment = antiCheatEnvironment(gameLocaleEnvironment(gameWindowEnvironment(gameLoggingEnvironment(protonRunner
       ? { ...process.env }
       : { ...process.env, WINEPREFIX: legacyPrefixRoot, WINEARCH: 'win64' }, verboseLogs)), locale));
+    // Never inherit another title's discovery list. Hints are scoped public
+    // metadata, not licenses, and cannot make an optional lookup block Play.
+    delete environment.NEXUS_RELATED_PRODUCT_IDS;
+    if (await storeDiscoveryRuntime(wine)) {
+      const related = await contentManager().relatedProducts(game, accountLibrary.peekAccess(), currentMarket()).catch(() => {
+        addGameLog('Additional DLC discovery unavailable. Continuing with package-declared content.');
+        return [] as string[];
+      });
+      if (related.length) environment.NEXUS_RELATED_PRODUCT_IDS = related.join(',');
+    }
     const contentRoots = await contentManager().roots(game).catch(error => {
       addGameLog(`Managed content discovery unavailable: ${(error as Error).message}`);
       return [] as string[];
     });
     if (contentRoots.length) environment.XODUS_CONTENT_ROOTS = [environment.XODUS_CONTENT_ROOTS, ...contentRoots.map(root => 'Z:' + root.replaceAll('/', '\\'))].filter(Boolean).join(';');
     if (locale) {
-      addGameLog(`Selected package language: ${locale}.`);
-      await syncPrefixUserLocale(wineCommand, protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, locale, environment, addGameLog);
+      addGameLog(`Selected game language: ${locale}.`);
     }
+    await syncPrefixUserLocale(wineCommand, protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, locale, environment, addGameLog);
     await syncUnrealCultureGameIni(protonRunner ? path.join(compatibilityDataPath, 'pfx') : legacyPrefixRoot, game.path, titleId, locale, addGameLog);
     if (cloudRuntime) {
       serviceSession = await startXodusService(binary, app.getPath('userData'), addGameLog);
@@ -947,7 +967,8 @@ async function prepareGameLaunch(id: string): Promise<void> {
       } else {
         const detail = result.output.split('\n').map((line) => line.trim()).filter(Boolean).slice(-6).join(' | ');
         gameOperation.status = 'failed';
-        gameOperation.error = `Xodus run exited with code ${result.code}${detail ? `: ${detail.slice(0, 900)}` : '.'}`;
+        gameOperation.error = contentLicenseFailure(result.output.split('\n'))
+          ?? `Xodus run exited with code ${result.code}${detail ? `: ${detail.slice(0, 900)}` : '.'}`;
         gameOperation.phase = gameOperation.error;
       }
     }).catch((error) => {
@@ -1033,7 +1054,7 @@ async function installGameVcRuntime(id: string): Promise<void> {
   try {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
     const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'));
-    if (!protonRunner) throw new Error('VC++ installation requires Xodus Proton, not a standalone Wine binary.');
+    if (!protonRunner) throw new Error('VC++ installation requires a full Proton runtime, not a standalone Wine binary.');
     const prefix = path.join(compatibilityDataPath, 'pfx');
     const previous = await installedVcRuntimeVersion(prefix);
     if (previous && versionAtLeast(previous, VC_REDIST_VERSION)) {
@@ -1310,7 +1331,7 @@ function registerIpc(): void {
     const binary = requireBackend('streaming');
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings to choose installation packages.');
     const productId = safeProductId(raw), market = currentMarket();
-    const plan = await readInstallPlan(binary, productId, market);
+    const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try again.');
     return plan;
   });
@@ -1342,6 +1363,7 @@ function registerIpc(): void {
       if (!task || task.status !== 'paused' || operations.has(id)) throw new Error('This download cannot be resumed.');
       // Remove only the stale queue row, never files/checkpoints. The new backend
       // process validates package identity and resumes durable byte checkpoints.
+      const resumed = structuredClone(task);
       task.status = 'cancelled';
       return (async () => {
         try {
@@ -1350,7 +1372,7 @@ function registerIpc(): void {
           if (task.kind === 'content') {
             if (!task.gameId) throw Error('Content download has no parent game.');
             await installGameContent(task.gameId, task.productId);
-          } else await startInstall({ productId: task.productId, title: task.title, destination: task.destination, selectedContentId: task.selectedContentId, selectionMarket: task.selectionMarket }, game);
+          } else await startInstall({ productId: task.productId, title: task.title, destination: task.destination, selectedContentId: task.selectedContentId, selectionMarket: task.selectionMarket }, game, resumed);
           await store.removeDownload(id);
         } catch (error) { task.status = 'paused'; throw error; }
         finally { emitSnapshot(); }
@@ -1373,7 +1395,7 @@ function registerIpc(): void {
     if (typeof patch.locale === 'string') {
       const game = store.games.find((entry) => entry.id === id);
       if (!game) throw new Error('Game not found.');
-      allowed.locale = supportedGameLocale(patch.locale, await gameLocales(game)) ?? '';
+      allowed.locale = supportedGameLocale(patch.locale) ?? '';
     }
     const game = await store.patchGame(id, allowed);
     emitSnapshot();

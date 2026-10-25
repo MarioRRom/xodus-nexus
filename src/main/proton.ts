@@ -4,6 +4,8 @@ import path from 'node:path';
 import { run } from './process.js';
 import { installedEacRuntime } from './anti-cheat.js';
 import { prepareManagedPrefix } from './managed-prefix.js';
+import { systemGameLocale } from './game-locale.js';
+import { windowsGameLocale } from '../shared/game-language.js';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -85,29 +87,93 @@ async function rebaseRuntimeSymlinks(prefix: string, protonRoot: string): Promis
 export async function prefixUserLocale(prefix: string): Promise<string | undefined> {
   try {
     const userReg = await fs.readFile(path.join(prefix, 'user.reg'), 'latin1');
-    return userReg.match(/"LocaleName"="([^"]*)"/)?.[1];
+    const section = userReg.split(/\r?\n(?=\[)/).find(part => /^\[Control Panel\\\\International\]/m.test(part));
+    return section?.match(/^"LocaleName"="([^"]*)"/m)?.[1];
   } catch { return undefined; }
 }
 
 export async function syncPrefixUserLocale(
   wineCommand: string,
   prefix: string,
-  locale: string,
+  locale: string | undefined,
   env: NodeJS.ProcessEnv,
   onLine: (line: string) => void,
 ): Promise<void> {
-  if (!locale.includes('-')) return;
+  try { await synchronizePrefixUserLocale(wineCommand, prefix, locale, env, onLine); }
+  catch {
+    // An optional language override must not prevent an otherwise valid game
+    // from starting because its locale marker or registry tool is unavailable.
+    onLine('The prefix user locale could not be synchronized; the game may use the previous language.');
+  }
+}
+
+async function synchronizePrefixUserLocale(
+  wineCommand: string,
+  prefix: string,
+  locale: string | undefined,
+  env: NodeJS.ProcessEnv,
+  onLine: (line: string) => void,
+): Promise<void> {
+  const marker = path.join(prefix, '.nexus-user-locale.json');
+  let managed: { schema: number; applied: string } | undefined;
+  try {
+    const handle = await fs.open(marker, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > 512 || stat.nlink !== 1) throw Error('Invalid locale marker.');
+      const buffer = Buffer.alloc(513);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > 512) throw Error('Invalid locale marker.');
+      const value = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+      if (value?.schema !== 1 || typeof value.applied !== 'string' || windowsGameLocale(value.applied) !== value.applied) throw Error('Invalid locale marker.');
+      managed = value;
+    } finally { await handle.close(); }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      onLine('The managed game-language record is unavailable; leaving the prefix locale unchanged.');
+      return;
+    }
+  }
+  if (!locale && !managed) return;
   const current = await prefixUserLocale(prefix);
-  if (current === locale) return;
-  onLine(`Updating the Windows user locale of the game prefix from ${current ?? 'unset'} to ${locale}.`);
+  if (!locale && current && current !== managed!.applied) {
+    // Another tool or the user changed it after Nexus. Do not reset their work.
+    await fs.unlink(marker);
+    return;
+  }
+  const target = locale ? windowsGameLocale(locale) : systemGameLocale(env);
+  if (!target) {
+    onLine('The system language could not be resolved; leaving the prefix locale unchanged.');
+    return;
+  }
+  if (current === target) {
+    if (!locale) await fs.unlink(marker);
+    return;
+  }
+  onLine(`Updating the Windows user locale of the game prefix from ${current ?? 'unset'} to ${target}.`);
   // Wine pins HKCU\Control Panel\International in the prefix at creation and
   // ignores later LANG changes. Deleting the key makes Wine rebuild it from
   // the launch environment, so titles that read the Windows user locale
   // instead of XPackageGetUserLocale follow the selected game language.
-  const result = await run(wineCommand, ['reg', 'delete', 'HKCU\\Control Panel\\International', '/f'], { env, maxOutput: 100_000 });
+  const result = await run(wineCommand, ['reg', 'delete', 'HKCU\\Control Panel\\International', '/f'], { env: { ...env, WINEUSERLOCALE: target }, maxOutput: 100_000 });
   if (result.code !== 0) {
     onLine(`The prefix user locale could not be updated (reg exited with code ${result.code}); the game may use the previous language.`);
+    return;
   }
+  if (locale) {
+    // The key is recreated by the next Wine process from this launch's locale.
+    await fs.mkdir(prefix, { recursive: true });
+    const temporary = `${marker}.${process.pid}.tmp`;
+    const handle = await fs.open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify({ schema: 1, applied: target }));
+      await handle.close();
+      await fs.rename(temporary, marker);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await fs.unlink(temporary).catch(() => undefined);
+    }
+  } else await fs.unlink(marker);
 }
 
 function unrealCultureGameIniContent(existing: string, locale: string): string | null {

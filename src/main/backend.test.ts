@@ -13,6 +13,7 @@ vi.mock('./process.js', async importOriginal => {
   return { ...actual, run: vi.fn(async (cmd: string, args: string[], options: object) => {
     if (cmd.endsWith('/xodus-cli')) {
       const marker = (await fs.readFile(cmd))[63];
+      if (args[0] === 'resolve-package') return { code:0,output: marker === 6 ? '--include-dlc\n' : '--json\n--market\n' };
       return { code: 0, output: args[0] === 'streaming' ? '--selected-content-id\n' + ([3,5].includes(marker) ? '--progress-json\n--control-stdin\n' : '') + (marker === 3 ? '--download-limit-kib\n' : '') : args[0] === 'run' ? (marker === 2 ? '--unsupported' : '--materialize-chain') :
         (marker === 1 ? 'xodus-cli 0.1.0\n  login    Login\n  streaming    Streaming\n' :
         'xodus-cli 0.1.0\n  account    Account\n  login    Login\n  logout    Logout\n  download    Download\n  streaming    Streaming\n  run    Run\n  resolve-package    Resolve packages\n' + (marker === 4 ? '' : '\nOptions:\n  --external-webview-stdio  External UI\n')) };
@@ -29,6 +30,15 @@ const url = (name: string) => `https://github.com/domsvoboda/xodus-nexus/release
 const elf = () => { const bytes = Buffer.alloc(64); bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1]); bytes.writeUInt16LE(62, 18); return bytes; };
 
 describe('prebuilt backend', () => {
+  it.each([false,true])('only enables Durable selection when the real subcommand advertises it: %s',async supported=>{
+    const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-content-cap-'));
+    try{const cli=path.join(root,'target/release/xodus-cli');await fs.mkdir(path.dirname(cli),{recursive:true});
+      const bytes=elf();if(supported)bytes[63]=6;await fs.writeFile(cli,bytes,{mode:0o755});
+      const status=await new BackendManager(root,root,()=>{},()=>false).refresh();
+      expect(status.capabilities.contentPackageSelection).toBe(supported);
+      expect(status.capabilities.packageSelection).toBe(true);
+    }finally{await fs.rm(root,{recursive:true,force:true});}
+  });
   it.each([false, true])('detects structured progress and controls from actual subcommand help: %s', async supported => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-progress-caps-'));
     try {

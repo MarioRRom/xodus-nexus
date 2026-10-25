@@ -1,5 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { InstallPlan, InstallRequest } from '../shared/types';
+import type { CatalogProduct, InstallPlan, InstallRequest } from '../shared/types';
+
+export function catalogInstallRequest(product: Pick<CatalogProduct, 'productId' | 'installProductId' | 'title'>, destination: string): InstallRequest {
+  return { productId: product.productId, title: product.title, destination };
+}
 
 type Install = (request: InstallRequest) => Promise<string | undefined>;
 const InstallContext = createContext<Install>(async () => { throw Error('Installation dialog is unavailable.'); });
@@ -18,7 +22,7 @@ export function PackageDialog({ plan, choose }: { plan: InstallPlan; choose: (id
       <p>Choose the package you want to install from this Store offer. Xodus checks your license before downloading.</p>
       <div className="package-choices">{plan.choices.map(item => <label className={`package-choice${item.supported ? '' : ' unsupported'}`} key={`${item.productId}:${item.contentId}`}>
         <input type="radio" name="install-package" value={item.contentId} disabled={!item.supported} checked={selected === item.contentId} onChange={() => setSelected(item.contentId)} />
-        <span><strong>{item.title}</strong><small>{item.platform || 'Unknown platform'} · {item.packageFormat || 'Unknown format'}{item.kind === 'GameAddOn' ? ' · Add-on' : ''}{!item.supported ? ' · Unsupported' : ''}</small><small>Store ID {item.productId}</small><small className="package-content-id">Package {item.contentId}</small></span>
+        <span><strong>{item.title}</strong><small>{item.platform || 'Unknown platform'} · {item.packageFormat || 'Unknown format'}{['GameAddOn', 'Durable'].includes(item.kind) ? ' · Add-on' : ''}{!item.supported ? ' · Unsupported' : ''}</small><small>Store ID {item.productId}</small><small className="package-content-id">Package {item.contentId}</small></span>
       </label>)}</div>
       <div className="dialog-actions"><button className="secondary" data-gamepad-cancel onClick={() => choose()}>Cancel</button><button className="primary" disabled={!selected} onClick={() => choose(selected)}>Install selected package</button></div>
     </section>

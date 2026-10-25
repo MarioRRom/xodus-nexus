@@ -19,6 +19,7 @@ const stages = new Set([
   'entitlement-shape', 'entitlement-count', 'entitlement-product', 'entitlement-status', 'entitlement-trial', 'entitlement-sharing',
   'entitlement-expiry', 'entitlement-parent', 'entitlements-request', 'entitlements-http', 'entitlements-cursor', 'entitlements-pagination',
   'entitlements-size', 'entitlements-read', 'entitlements-json', 'entitlements-inconsistent', 'complete', 'partial',
+  'access-unresolved', 'access-conditional', 'access-special', 'access-parent-unavailable', 'access-cycle', 'access-depth',
   'timeout', 'invalid-response', 'loader-library', 'panic', 'ready', 'protocol-error', 'cancelled', 'window-error', 'spawn-not-found', 'spawn-permission',
 ]);
 type Event = 'start' | 'exit' | 'spawn-error' | 'diagnostic' | 'validation';

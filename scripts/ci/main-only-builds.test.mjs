@@ -7,7 +7,8 @@ const read=async name=>yaml.load(await fs.readFile(`.github/workflows/${name}.ym
 test('full backend/runtime workflows only build main, including manual dispatch',async()=>{
   for(const [name,job] of [['backend','build'],['runtime','changes']]){
     const workflow=await read(name);
-    assert.deepEqual(workflow.on.push.branches,['main']);
+    if(name==='backend')assert.deepEqual(workflow.on.push.branches,['main']);
+    else assert.deepEqual(Object.keys(workflow.on),['workflow_dispatch']);
     assert.equal(workflow.on.pull_request,undefined);
     assert.equal(workflow.jobs[job].if,"github.ref == 'refs/heads/main'");
   }
