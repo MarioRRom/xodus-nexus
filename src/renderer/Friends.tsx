@@ -5,6 +5,12 @@ import { xboxAvatarUrl, xboxMessageText, xboxSocialError, type XboxConversation,
 import { FriendsRefresh } from './friends-refresh';
 import './friends.css';
 
+// Warm only after pointer/keyboard intent, never on startup or while signing in.
+export function preloadFriends(data:AppSnapshot,load:()=>Promise<unknown>=()=>window.launcher.getXboxFriends()):void {
+  if(data.auth.stored!==true||data.auth.running||!data.backend.available||!data.backend.capabilities.commands.includes('social'))return;
+  void load().catch(()=>{});
+}
+
 export function FriendAvatar({ friend }: { friend: XboxFriend }) {
   const url = xboxAvatarUrl(friend.avatarUrl);
   const [failed,setFailed] = useState(false);

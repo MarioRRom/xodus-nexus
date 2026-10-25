@@ -1,8 +1,15 @@
-import { expect,it } from 'vitest';
+import { expect,it,vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { FriendAvatar, Friends } from './Friends';
+import { FriendAvatar, Friends, preloadFriends } from './Friends';
 import { TopStatus } from './App';
 import { demoSnapshot } from '../shared/demo-data';
+it('warms reads only after explicit intent with a supported signed-in account',async()=>{
+  const data=demoSnapshot(),load=vi.fn(async()=>{});
+  data.auth.stored=false;preloadFriends(data,load);data.auth.stored=true;data.auth.running=true;preloadFriends(data,load);
+  data.auth.running=false;data.backend.available=false;preloadFriends(data,load);data.backend.available=true;data.backend.capabilities.commands=[];preloadFriends(data,load);
+  expect(load).not.toHaveBeenCalled();data.backend.capabilities.commands.push('social');preloadFriends(data,load);expect(load).toHaveBeenCalledOnce();
+  load.mockRejectedValue(Error('synthetic offline'));preloadFriends(data,load);await Promise.resolve();
+});
 it('shows honest capability and account prerequisites instead of fake friends or invites',()=>{
   const data=demoSnapshot();data.auth.stored=false;
   let html=renderToStaticMarkup(<Friends data={data} close={()=>{}} />);

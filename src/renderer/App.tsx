@@ -23,7 +23,7 @@ import { GameLanguage } from './GameLanguage';
 import { DownloadCancelDialog } from './DownloadCancelDialog';
 import { KeyringSetup } from './KeyringSetup';
 import { DiagnosticReportButton } from './DiagnosticReport';
-import { Friends } from './Friends';
+import { Friends, preloadFriends } from './Friends';
 import type { DownloadCancelOptions } from '../shared/types';
 export type { LibraryFilters } from './library-preferences';
 
@@ -1090,7 +1090,7 @@ export default function App() {
     {toast ? <div className={`toast ${toast.kind}`}>{toast.kind === 'success' ? <Check /> : toast.kind === 'error' ? <CircleAlert /> : <Terminal />}<span>{toast.message}</span><button onClick={() => setToast(undefined)}><X /></button></div> : null}
     <div className="friends-dock">
       {friendsOpen?<Friends key={JSON.stringify([data.auth.username,data.backend.binaryPath])} data={data} close={()=>setFriendsOpen(false)} docked />:null}
-      <button className="friends-dock-toggle" aria-label="Xbox friends and chat" aria-expanded={friendsOpen} onClick={()=>setFriendsOpen(value=>!value)}><UsersRound /><span><strong>Friends</strong><small>{data.social?.incoming.length?`${data.social.incoming.length} game invitation${data.social.incoming.length===1?'':'s'}`:'Chat and game invitations'}</small></span><ChevronRight className={friendsOpen?'expanded':''} /></button>
+      <button className="friends-dock-toggle" aria-label="Xbox friends and chat" aria-expanded={friendsOpen} onPointerEnter={()=>{if(!friendsOpen)preloadFriends(data);}} onFocus={()=>{if(!friendsOpen)preloadFriends(data);}} onClick={()=>setFriendsOpen(value=>!value)}><UsersRound /><span><strong>Friends</strong><small>{data.social?.incoming.length?`${data.social.incoming.length} game invitation${data.social.incoming.length===1?'':'s'}`:'Chat and game invitations'}</small></span><ChevronRight className={friendsOpen?'expanded':''} /></button>
     </div>
   </div><GamepadNavigation back={() => friendsOpen?setFriendsOpen(false):setPage('home')} page={delta => { if(friendsOpen)return;setPage(current => {
     const pages: Page[] = ['home', 'library', 'store'];
