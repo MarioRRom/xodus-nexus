@@ -269,6 +269,23 @@ test('backend build runs account-free credential persistence regressions', async
     lock.patches.findIndex(p => p.file === 'xodus-keyring-encoding.patch'));
 });
 
+test('authenticated account metadata remains bound, additive and covered by backend regressions', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  assert.equal(lock.patches.at(-1).file, 'xodus-authenticated-account-metadata.patch');
+  const patch = await fs.readFile('assets/xodus-authenticated-account-metadata.patch', 'utf8');
+  for (const expected of ['get_user_sts_session', 'self.user_session()?', 'bound_ids',
+    'credential_account_metadata_snapshot_is_atomic_and_logout_removes_it',
+    'credential_account_metadata_never_pairs_different_sessions_under_concurrent_reads',
+    'account_metadata_uses_real_session_ids_and_rejects_mixed_accounts',
+    'account_metadata_rejects_placeholder_malformed_and_empty_ids',
+    'account_metadata_xml_is_additive_and_omitted_for_unbound_sessions',
+    'skip_serializing_if = "Option::is_none"']) assert.ok(patch.includes(expected), expected);
+  assert.doesNotMatch(patch, /diff --git a\/.*(?:login\.rs|license\.rs|streaming\.rs|run\.rs)/);
+  assert.doesNotMatch(patch, /^\+.*(?:println!|tracing::).*puid/m);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.ok(build.includes("'-p', 'xodus-service', 'account_metadata_'"));
+});
+
 test('GNOME textual keyring regression uses only in-memory synthetic data', { skip: process.platform !== 'linux' }, () => {
   execFileSync('python3', ['scripts/keyring-textual-roundtrip.test.py'], { stdio: 'pipe' });
 });
@@ -340,4 +357,48 @@ test('corresponding-source archive preserves nested target source directories', 
     assert.match(build, /command\('tar', backendSourceArchiveArgs\(/);
     assert.match(build, /copyFile\(path.join\(root, 'scripts\/backend-source-archive.mjs'\)/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+test('Durable package selection is opt-in, parent-bound and preserves legacy automatic game downloads',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(p=>p.file==='xodus-durable-content.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  for(const expected of ['include_dlc: bool','without_durable_selection','parentProductId','mainPackageFamilyName',
+    'durable_pc_package_requires_explicit_selection_and_verified_parent_metadata',
+    'durable_missing_foreign_or_ambiguous_parent_and_non_pc_formats_stay_unsupported'])assert.ok(patch.includes(expected),expected);
+  const files=[...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match=>match[1]).sort();
+  assert.deepEqual(files,['crates/xodus-cli/src/commands/streaming.rs','crates/xodus-cli/src/main.rs','crates/xodus-cli/src/package_plan.rs']);
+  assert.doesNotMatch(patch,/^[+-].*(?:ensure_device|init_secrets|\.get_packages|\.get_license|\.save_|\.remove_)/m);
+  const main=await fs.readFile('src/main/index.ts','utf8');
+  assert.ok(main.includes('contentParentForChoice(choice, store.games)'));assert.ok(main.includes("if (updateGame && choice.kind === 'Durable')"));
+  const build=await fs.readFile('scripts/build-backend.mjs','utf8');assert.ok(build.includes("['resolve-package', '--help']"));
+});
+
+test('conditional entitlement provenance is typed without changing account, download or launch code', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(patch => patch.file === 'xodus-conditional-entitlements.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]);
+  assert.deepEqual(files, ['crates/xodus-cli/src/commands/library.rs']);
+  for (const expected of ['and_then(Value::as_bool) == Some(true)', '"isPositron":positron',
+    'positron_provenance_is_explicit_boolean_and_never_copied_from_untrusted_fields',
+    'conflicting_positron_and_unknown_special_rows_quarantine_their_children', 'positron_normalized_protocol_fixture'])
+    assert.ok(patch.includes(expected), expected);
+  assert.doesNotMatch(patch, /^[+-].*(?:store_session|\.get_user|\.get_license|Authorization|\.send\(|\.save_|\.remove_)/m);
+});
+
+test('Store device-limit guidance is a bounded response-only change with the official management URL', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(patch => patch.file === 'xodus-content-device-limit.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]), [
+    'crates/xodus/src/licensing/content_response.rs', 'crates/xodus/src/licensing/content_response_tests.rs',
+  ]);
+  for (const text of ['satisfaction_failure.code == 501', 'content-device-limit',
+    'https://account.microsoft.com/devices/content', 'content_license_device_limit_http_is_not_an_http501_and_never_retries'])
+    assert.ok(patch.includes(text), text);
+  assert.doesNotMatch(patch, /^[+-].*(?:\.send\(|\.post\(|Authorization|\.save_|\.remove_|ensure_device|init_secrets)/m);
 });

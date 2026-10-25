@@ -16,6 +16,7 @@ export interface BackendCapabilities {
   streamingControls?: boolean;
   streamingBandwidthLimit?: boolean;
   packageSelection?: boolean;
+  contentPackageSelection?: boolean;
   run: boolean;
   version?: string;
 }
@@ -96,6 +97,7 @@ export interface Game {
   title: string;
   path: string;
   storeId?: string;
+  offerProductId?: string; // Requested Store edition, not a license or replacement for the base identity.
   publisher?: string;
   installedVersion?: string;
   packageName?: string;
@@ -243,6 +245,8 @@ export interface InstallChoice {
   packageFormat: string;
   kind: string;
   supported: boolean;
+  parentProductId?: string;
+  mainPackageFamilyName?: string;
 }
 
 export interface InstallPlan {
@@ -256,8 +260,8 @@ export interface InstallPlan {
 export interface GameContentItem {
   productId: string;
   title: string;
-  access?: 'owned' | 'gamepass';
-  status: 'installed' | 'available' | 'unlicensed' | 'unsupported';
+  access?: LibraryAccess;
+  status: 'installed' | 'available' | 'verify' | 'unlicensed' | 'unsupported' | 'bundle' | 'license-only';
   downloadBytes?: number;
   note: string;
 }
@@ -336,10 +340,13 @@ export interface CatalogSearchResult {
   source: 'Microsoft Store';
 }
 
+export type LibraryAccess = 'owned' | 'gamepass' | 'other';
 export interface AccountLibraryPage {
-  kind: 'all' | 'owned' | 'gamepass';
-  products: (CatalogProduct & { access: 'owned' | 'gamepass' })[];
-  accessByProductId: Record<string, 'owned' | 'gamepass'>;
+  kind: 'all' | LibraryAccess;
+  products: (CatalogProduct & { access: LibraryAccess })[];
+  accessByProductId: Record<string, LibraryAccess>;
+  unclassifiedEntitlements?: number;
+  excludedEntitlements?: number;
   cursor?: string;
   checkedAt: string;
   skippedEntitlements?: number;

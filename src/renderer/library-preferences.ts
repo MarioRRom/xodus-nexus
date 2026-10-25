@@ -16,7 +16,7 @@ type Preferences = Pick<Storage, 'getItem' | 'setItem'>;
 function normalize(value: unknown): LibraryFilters {
   const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   return {
-    kind: record.kind === 'owned' || record.kind === 'gamepass' ? record.kind : 'all',
+    kind: record.kind === 'owned' || record.kind === 'gamepass' || record.kind === 'other' ? record.kind : 'all',
     playState: record.playState === 'installed' || record.playState === 'installable' ? record.playState : 'all',
     // Search is session-only, including when loading older saved preferences.
     query: '',

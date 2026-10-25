@@ -2,17 +2,21 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { demoSnapshot } from '../shared/demo-data.js';
 import { StateStore } from './store.js';
+import { GameContent } from './game-content.js';
+import { DownloadCleanup } from './download-cleanup.js';
 
 // Run the real IPC/admission/download lifecycle with synthetic child processes.
 // No account, executable, network, installed game or production profile is used.
 const h = vi.hoisted(() => ({
   root: '', wine: '', backend: {} as any, runtime: {} as any,
+  savedPausedId: '',
   handlers: new Map<string, (...args: any[]) => any>(),
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
-  game: undefined as undefined | { finish: () => void },
+  game: undefined as undefined | { finish: (code?: number, output?: string) => void },
   quit: vi.fn(),
   blockDisplay: vi.fn(() => 7), releaseDisplay: vi.fn(() => true),
   steamProfiles: [] as string[], steamIsRunning: true,
@@ -22,6 +26,13 @@ const h = vi.hoisted(() => ({
   notifications: [] as { title: string; body: string }[],
   holdCancellation: false,
   holdAccountReads: false,
+  contentSupported: false,
+  discoverySupported: false,
+  libraryReads: 0,
+  launchEnvironments: [] as NodeJS.ProcessEnv[],
+  prefixLocales: [] as (string | undefined)[],
+  planOverrides: new Map<string, any>(),
+  libraryRows: [] as any[],
   accountReads: [] as ((result: { code: number; output: string }) => void)[],
   posters: vi.fn(async (ids: string[]) => new Map(ids.map(id => [id, `https://store-images.s-microsoft.com/${id}`]))),
 }));
@@ -55,14 +66,22 @@ vi.mock('./steam-shortcuts.js', async original => ({ ...await original<typeof im
 vi.mock('./steam-live.js', () => ({ addLiveSteamShortcut: h.liveImport }));
 vi.mock('./shortcut-icon.js', () => ({ loadShortcutIcon: async () => undefined }));
 vi.mock('./steam-artwork.js', () => ({ gameSteamPortrait: async (bytes: Buffer) => bytes, nexusSteamArtwork: async (bytes: Buffer) => ({ cover: bytes, wide: bytes }) }));
-vi.mock('./install-plan.js', () => ({ readInstallPlan: async () => ({}), installSelection: () => '11111111-1111-4111-8111-111111111111' }));
+vi.mock('./install-plan.js', async original => ({ ...await original<typeof import('./install-plan.js')>(),
+  readInstallPlan: async (_binary: string, productId: string, market: string) => h.planOverrides.get(productId) ?? ({
+    schema:1,rootProductId:productId,market,status:'ready',choices:[{productId,contentId:'11111111-1111-4111-8111-111111111111',title:'Synthetic game',kind:'Game',platform:'Windows.Desktop',packageFormat:'MSIXVC',supported:true}],
+  }),
+}));
 vi.mock('./xodus-service.js', () => ({ cloudSaveRuntime: async () => false, unbridgedCloudSaveRuntime: async () => false,
-  selectedWinePath: () => h.wine, storeContentRuntime: async () => false, startXodusService: vi.fn() }));
-vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async () => {}, syncUnrealCultureGameIni: async () => {} }));
+  selectedWinePath: () => h.wine, storeContentRuntime: async () => h.contentSupported, storeDiscoveryRuntime: async () => h.discoverySupported, startXodusService: vi.fn() }));
+vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async (_wine: string, _prefix: string, locale: string | undefined) => { h.prefixLocales.push(locale); }, syncUnrealCultureGameIni: async () => {} }));
 vi.mock('./game-wrapper.js', () => ({ prepareGameWrapper: async () => ({ command: h.wine, cleanup: async () => {} }) }));
 vi.mock('./process.js', () => ({
   run: async (_command: string, args: string[]) => ({ code: 0, output: args[0] === 'account' ? JSON.stringify({ stored: true, username: 'sample@example.test' }) : '' }),
   spawnTracked: (_command: string, args: string[], options: any) => {
+    if (args[0] === 'library') { h.libraryReads++;return {
+      child: { kill: vi.fn(), stderr: { on() {}, removeListener() {} } },
+      result: Promise.resolve({code:0,output:JSON.stringify({schema:1,account:'sample@example.test',market:'US',checkedAt:new Date().toISOString(),entitlements:h.libraryRows})}),
+    }; }
     if (args[0] === 'account') return {
       child: { kill: vi.fn(() => true) },
       result: h.holdAccountReads
@@ -77,10 +96,11 @@ vi.mock('./process.js', () => ({
     return { child: { stdin: { on() {}, write: (line: string) => progress(JSON.parse(line).command === 'pause') }, kill: (signal: string) => { h.signals.push(signal); if (!h.holdCancellation) resolve({ code: 130, output: '' }); return true; } }, result };
   },
 }));
-vi.mock('./game-process.js', () => ({ spawnGameProcess: async () => {
+vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_args:string[],options:{env:NodeJS.ProcessEnv}) => {
+  h.launchEnvironments.push({...options.env});
   let resolve!: (result: { code: number; output: string }) => void;
   const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
-  h.game = { finish: () => resolve({ code: 0, output: '' }) };
+  h.game = { finish: (code = 0, output = '') => resolve({ code, output }) };
   return { child: {}, result, cleanup: async () => {}, stop: async () => resolve({ code: 0, output: '' }), forceStop: async () => {} };
 } }));
 
@@ -94,11 +114,18 @@ beforeAll(async () => {
   const data = demoSnapshot(); h.backend = { ...data.backend, capabilities: { ...data.backend.capabilities, packageSelection: true }, binaryPath: path.join(h.root, 'synthetic-cli'), linuxRunPatch: 'test-patch' }; h.runtime = data.runtime;
   const store = new StateStore(path.join(h.root, 'userData'));
   await store.setSettings({ firstRunCompleted: true, market: 'US', runtimeRoot: path.join(h.root, 'runtime'), winePath: h.wine });
+  h.savedPausedId=randomUUID();
+  const partial={id:h.savedPausedId,kind:'install' as const,productId:'9TTTTTTTTTTT',title:'Paused fixture',
+    selectedContentId:'11111111-1111-4111-8111-111111111111',selectionMarket:'US',destination:path.join(h.root,'resumable-partial'),
+    status:'paused' as const,phase:'',log:[],progress:1,startedAt:''};
+  await new DownloadCleanup(path.join(h.root,'userData')).prepare(partial);
+  await fs.writeFile(path.join(partial.destination,'partial.bin'),'disposable interrupted download');
+  await store.addDownload(partial);
   const gamePath = path.join(h.root, 'installed-game'); await fs.mkdir(gamePath);
-  await fs.writeFile(path.join(gamePath, 'MicrosoftGame.config'), '<Game><ShellVisuals DefaultDisplayName="Sample game"/><ExecutableList><Executable Name="Game.exe"/></ExecutableList><StoreId>9ZZZZZZZZZZZ</StoreId></Game>');
+  await fs.writeFile(path.join(gamePath, 'MicrosoftGame.config'), '<Game><Identity Name="Example.Base" Version="1.0.0.0" Publisher="CN=Example"/><ShellVisuals DefaultDisplayName="Sample game"/><ExecutableList><Executable Name="Game.exe"/></ExecutableList><StoreId>9ZZZZZZZZZZZ</StoreId></Game>');
   await fs.writeFile(path.join(gamePath, 'Game.exe'), 'MZ fixture');
   await fs.writeFile(path.join(gamePath, '.xodus-streaming.msixvc'), 'synthetic container');
-  await store.upsertGame({ ...data.games[0], id: 'sample', path: gamePath, storeId: '9ZZZZZZZZZZZ', executable: 'Game.exe', installState: 'ready' });
+  await store.upsertGame({ ...data.games[0], id: 'sample', path: gamePath, storeId: '9ZZZZZZZZZZZ', packageName:'Example.Base', executable: 'Game.exe', installState: 'ready' });
   for (const id of ['remove-library', 'remove-delete', 'remove-fail', 'remove-playing-other']) {
     const directory = path.join(h.root, id); await fs.mkdir(directory);
     await fs.writeFile(path.join(directory, 'MicrosoftGame.config'), '<Game/>');
@@ -280,6 +307,131 @@ it('keeps new partials by default and refuses deletion of an existing folder or 
   expect(await fs.readFile(path.join(h.root, 'installed-game/Game.exe'), 'utf8')).toBe('MZ fixture');
   await ipc('cancel-download', update, 'keep'); h.downloads.splice(0);
   await expect(ipc('cancel-download', update, 'invalid')).rejects.toThrow('Invalid cancellation');
+});
+
+it('resumes a persisted partial through real IPC and preserves safe cancellation cleanup under the new task ID',async()=>{
+  expect(await ipc('download-cancel-options',h.savedPausedId)).toEqual({deleteFilesAllowed:true});
+  await ipc('resume-download',h.savedPausedId);
+  await vi.waitFor(()=>expect(h.downloads).toHaveLength(1));
+  const task=snapshot().downloads.find((task:any)=>task.productId==='9TTTTTTTTTTT');
+  expect(task.id).not.toBe(h.savedPausedId);expect(task.status).toBe('running');
+  expect(snapshot().downloads.some((task:any)=>task.id===h.savedPausedId)).toBe(false);
+  expect(await fs.readFile(path.join(task.destination,'partial.bin'),'utf8')).toBe('disposable interrupted download');
+  expect(await ipc('download-cancel-options',task.id)).toEqual({deleteFilesAllowed:true});
+  await ipc('cancel-download',task.id,'delete-files');
+  await expect(fs.access(task.destination)).rejects.toThrow();
+  expect(await fs.readFile(path.join(h.root,'installed-game','Game.exe'),'utf8')).toBe('MZ fixture');
+  h.downloads.splice(0);
+});
+
+it('routes a direct Durable through real managed-content admission and completion without changing the base or adding a game',async()=>{
+  const id='9MMMMMMMMMMM',base='9ZZZZZZZZZZZ',cid='22222222-2222-4222-8222-222222222222';
+  const gamePath=path.join(h.root,'installed-game'),before=await fs.readFile(path.join(gamePath,'MicrosoftGame.config'),'utf8');
+  const gamesBefore=snapshot().games.length,fetcher=globalThis.fetch;
+  const packageData={ContentId:cid,PackageFormat:'MSIXVC',Architectures:['x64'],PlatformDependencies:[{PlatformName:'Windows.Desktop'}],PackageFamilyName:'Example.Dlc_hash',MainPackageFamilyNameForDlc:'Example.Base_hash'};
+  const records=[{ProductId:base,ProductType:'Game',DisplaySkuAvailabilities:[{Sku:{Properties:{IsTrial:false,Packages:[{...packageData,PackageFamilyName:'Example.Base_hash',MainPackageFamilyNameForDlc:undefined}]}}}]},
+    {ProductId:id,ProductType:'Durable',LocalizedProperties:[{ProductTitle:'Synthetic DLC'}],DisplaySkuAvailabilities:[{Sku:{Properties:{IsTrial:false,Packages:[packageData]}}}]}];
+  h.planOverrides.set(id,{schema:1,rootProductId:id,market:'US',status:'choice',choices:[{productId:id,contentId:cid,title:'Synthetic DLC',kind:'Durable',platform:'Windows.Desktop',packageFormat:'MSIXVC',supported:true,parentProductId:base,mainPackageFamilyName:'Example.Base_hash'}]});
+  h.libraryRows=[{productId:id,status:'Active',isTrial:false,special:false,sharingSource:'None',endDate:'2099-01-01T00:00:00Z'}];h.contentSupported=true;
+  globalThis.fetch=async input=>{const url=new URL(String(input));if(url.hostname!=='displaycatalog.mp.microsoft.com')throw Error('No fixture network permitted');const ids=url.searchParams.get('bigIds')!.split(',');return new Response(JSON.stringify({Products:records.filter(p=>ids.includes(p.ProductId))}));};
+  try{
+    await vi.waitFor(()=>expect(snapshot().auth.stored).toBe(true));
+    const taskId=await ipc('start-install',{productId:id,title:'Synthetic DLC',destination:gamePath,selectedContentId:cid,selectionMarket:'US'});
+    await vi.waitFor(()=>expect(h.downloads).toHaveLength(1));
+    const task=snapshot().downloads.find((task:any)=>task.id===taskId);
+    expect(task.kind).toBe('content');expect(task.gameId).toBe('sample');expect(task.destination.startsWith(gamePath)).toBe(false);
+    expect(h.downloads[0].args[1]).toBe(cid);expect((await ipc('download-cancel-options',taskId)).deleteFilesAllowed).toBe(false);
+    await fs.writeFile(path.join(task.destination,'MicrosoftGame.config'),`<Game><Identity Name="Example.Dlc" Version="1.0.0.0" Publisher="CN=Example"/><StoreId>${id}</StoreId><AllowedProducts><AllowedProduct>${base}</AllowedProduct></AllowedProducts><DesktopRegistration><MainPackageDependency Name="Example.Base"/></DesktopRegistration></Game>`);
+    await fs.writeFile(path.join(task.destination,'appxmanifest.xml'),'<Package><Identity Name="Example.Dlc" Version="1.0.0.0" Publisher="CN=Example"/><Dependencies><MainPackageDependency Name="Example.Base"/></Dependencies></Package>');
+    await fs.writeFile(path.join(task.destination,`layout_${cid}.xml`),'<Package><Chunk><FileGroup SourcePath="." Include="MicrosoftGame.config"/></Chunk></Package>');
+    h.downloads[0].progress(false,'complete');h.downloads[0].finish(0);
+    await vi.waitFor(()=>expect(snapshot().downloads.find((task:any)=>task.id===taskId).status).toBe('complete'));
+    expect(await fs.readFile(path.join(gamePath,'MicrosoftGame.config'),'utf8')).toBe(before);
+    expect(await fs.readFile(path.join(gamePath,'Game.exe'),'utf8')).toBe('MZ fixture');
+    expect(snapshot().games).toHaveLength(gamesBefore);
+    expect((await fs.readdir(task.destination))).toContain('.nexus-content-complete.json');
+  }finally{globalThis.fetch=fetcher;h.contentSupported=false;h.downloads.splice(0);h.notifications.splice(0);}
+});
+
+it('gates runtime DLC hints, clears inherited foreign hints and still launches after optional discovery fails without reading accounts',async()=>{
+  const old=process.env.NEXUS_RELATED_PRODUCT_IDS;
+  process.env.NEXUS_RELATED_PRODUCT_IDS='9FFFFFFFFFFF';
+  const discover=vi.spyOn(GameContent.prototype,'relatedProducts');
+  const beforeReads=h.libraryReads;
+  try{
+    for(const mode of ['legacy','supported','failure']){
+      h.discoverySupported=mode!=='legacy';
+      if(mode==='failure')discover.mockRejectedValueOnce(Error('private.invalid/signed?secret'));
+      else if(mode==='supported')discover.mockResolvedValueOnce(['9MMMMMMMMMMM']);
+      await ipc('launch-game','sample');expect(snapshot().gameOperation.status).toBe('running');
+      expect(h.launchEnvironments.at(-1)!.NEXUS_RELATED_PRODUCT_IDS).toBe(mode==='supported'?'9MMMMMMMMMMM':undefined);
+      expect(h.libraryReads).toBe(beforeReads);
+      if(mode==='legacy')expect(discover).not.toHaveBeenCalled();
+      if(mode==='failure')expect(snapshot().gameOperation.log.join('\n')).not.toContain('secret');
+      h.game!.finish();await vi.waitFor(()=>expect(snapshot().gameOperation.status).toBe('complete'));
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    expect(discover).toHaveBeenCalledTimes(2);
+  }finally{
+    discover.mockRestore();h.discoverySupported=false;h.blockDisplay.mockClear();h.releaseDisplay.mockClear();
+    if(old===undefined)delete process.env.NEXUS_RELATED_PRODUCT_IDS;else process.env.NEXUS_RELATED_PRODUCT_IDS=old;
+  }
+});
+
+it('saves and launches locale overrides without catalog or exhaustive manifest languages, including System default reset', async () => {
+  const manifest = path.join(h.root, 'installed-game/MicrosoftGame.config');
+  const before = await fs.readFile(manifest, 'utf8');
+  const reads = h.libraryReads, fetcher = globalThis.fetch;
+  globalThis.fetch = async () => { throw Error('Language settings must work offline'); };
+  const oldPackage = process.env.XODUS_PACKAGE_LOCALE, oldWine = process.env.WINEUSERLOCALE;
+  process.env.XODUS_PACKAGE_LOCALE = 'fr-FR'; process.env.WINEUSERLOCALE = 'fr-FR';
+  try {
+    await fs.rename(manifest, path.join(h.root, 'installed-game/MicrosoftGame.Config'));
+    expect(await ipc('game-locales', 'sample')).toEqual([]);
+    for (const [selection, expected] of [['pl-PL', 'pl-PL'], ['de', 'de-DE'], ['pt-PT', 'pt-PT'], ['', undefined]] as const) {
+      const game = await ipc('update-game', 'sample', { locale: selection });
+      expect(game.locale).toBe(selection);
+      await ipc('launch-game', 'sample'); expect(snapshot().gameOperation.status).toBe('running');
+      expect(h.prefixLocales.at(-1)).toBe(selection || undefined);
+      const env = h.launchEnvironments.at(-1)!;
+      expect(env.WINEUSERLOCALE).toBe(expected);
+      expect(env.XODUS_PACKAGE_LOCALE).toBe(selection || undefined);
+      if (selection === 'de') expect(env.LANG).toBe('de_DE.UTF-8');
+      expect(h.libraryReads).toBe(reads);
+      h.game!.finish(); await vi.waitFor(() => expect(snapshot().gameOperation.status).toBe('complete'));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    await expect(ipc('update-game', 'sample', { locale: 'de\nUNSAFE=value' })).rejects.toThrow();
+    expect(snapshot().games.find((game: any) => game.id === 'sample').locale).toBe('');
+    expect(await fs.readFile(path.join(h.root, 'installed-game/MicrosoftGame.Config'), 'utf8')).toBe(before);
+  } finally {
+    await fs.rename(path.join(h.root, 'installed-game/MicrosoftGame.Config'), manifest);
+    globalThis.fetch = fetcher;
+    if (oldPackage === undefined) delete process.env.XODUS_PACKAGE_LOCALE; else process.env.XODUS_PACKAGE_LOCALE = oldPackage;
+    if (oldWine === undefined) delete process.env.WINEUSERLOCALE; else process.env.WINEUSERLOCALE = oldWine;
+    h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
+  }
+});
+
+it('shows safe specific licensing guidance on failed launch and preserves later non-license errors', async () => {
+  for (const [output, expected] of [
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\nprivate@example.test t=SECRET', 'Microsoft Store device limit reached'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-not-entitled 200', 'purchased edition'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-http 501', 'server error'],
+    ['NEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-device-limit 200\nNEXUS_CONTENT_LICENSE_DIAGNOSTIC_V1 content-parsed 200\nlater extraction failure', 'later extraction failure'],
+  ]) {
+    await ipc('launch-game', 'sample');
+    h.game!.finish(1, output);
+    await vi.waitFor(() => expect(snapshot().gameOperation.status).toBe('failed'));
+    const error = snapshot().gameOperation.error;
+    expect(error).toContain(expected);
+    if (expected === 'Microsoft Store device limit reached') {
+      expect(error).toContain('https://account.microsoft.com/devices/content');
+      expect(error).not.toMatch(/SECRET|example.test|NEXUS_CONTENT_LICENSE/);
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
 });
 
 it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/download safely', async () => {

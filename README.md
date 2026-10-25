@@ -71,6 +71,15 @@ Flatpak version available through Discover. Other browsers are not supported.
 - If no wallet exists, use **Create wallet** and complete the system dialog. On KDE, choose **Classic, blowfish encrypted file** for a normal password-based wallet if you do not have a GPG encryption key. An empty password does not protect stored credentials.
 - If setup or the password dialog does not work in Game Mode, try it in Desktop Mode first. If the problem persists, include the backend diagnostic log in your issue report.
 
+## Microsoft Store device limit
+
+Microsoft Store supports up to 10 linked devices. If downloading or launching a
+game fails with **Microsoft Store device limit reached** (licensing code 501),
+open [Microsoft Store device management](https://account.microsoft.com/devices/content)
+and sign in with the same Microsoft account. Unlink only an old device you no
+longer use, then retry in Nexus. You do not need to sign out or reset the wallet.
+Other license errors can have different causes.
+
 [Documentation](https://github.com/domsvoboda/xodus-nexus/wiki) ·
 [Report an issue](https://github.com/domsvoboda/xodus-nexus/issues)
 
@@ -80,9 +89,13 @@ Flatpak version available through Discover. Other browsers are not supported.
 | --- | --- |
 | Xodus Nexus | Store browsing, library, installation queue and launch controls. |
 | Nexus backend | Patched build of [Xodus](https://github.com/xodus-gaming/xodus) for account sign-in, license checks, package downloads and launch preparation. |
-| Nexus runtime | Built on [Xodus Proton](https://github.com/xodus-gaming/Proton) and [Xodus XGameRuntime](https://github.com/xodus-gaming/xgameruntime), with additional Nexus compatibility patches. |
+| Nexus runtime | Shared [Wine](https://www.winehq.org/) / [Proton](https://github.com/ValveSoftware/Proton) runtime with [Xodus XGameRuntime](https://github.com/xodus-gaming/xgameruntime) and additional Nexus compatibility patches. |
 
 Every game uses the same launch path and shared runtime.
+
+The experimental [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
+is based on Valve's Proton Experimental. It is not yet installed automatically
+by released launchers.
 
 ## Compatible games
 
@@ -95,7 +108,7 @@ but have not been verified and may encounter compatibility issues.
 | Deep Rock Galactic | Yes | Playable online. |
 | Minecraft Dungeons | Yes | Playable online with launcher 0.3.5; [ownership failures](https://github.com/domsvoboda/xodus-nexus/issues/80) also reported on other setups. |
 | Minecraft Dungeons II | Yes | Playable online. |
-| Minecraft for Windows | Yes | Playable online. |
+| Minecraft for Windows | Yes | Playable online. For licensing code 501, check the [Store device limit](#microsoft-store-device-limit). |
 | Minecraft Launcher | Yes | Sign-in and Java download/startup work with launcher 0.3.5; Java online unverified. [Login failure](https://github.com/domsvoboda/xodus-nexus/issues/107) also reported on another setup. |
 | No Man's Sky | Yes | Playable online. |
 | Valor Mortis | Yes | Fully playable. |
@@ -116,6 +129,7 @@ but have not been verified and may encounter compatibility issues.
 | Tony Hawk's Pro Skater 3 + 4 | Partial | Solo playable; Private Match loads a map. Joining other players and public matchmaking remain unconfirmed. ([#88](https://github.com/domsvoboda/xodus-nexus/issues/88)) |
 | ARC Raiders | No | Launches but cannot connect to online services. ([user report](https://github.com/domsvoboda/xodus-nexus/issues/100)) |
 | Hogwarts Legacy | Yes | Playable. ([user report](https://github.com/domsvoboda/xodus-nexus/issues/110)) |
+| Halo Infinite | Partial | Unreleased Experimental runtime: main menu and campaign start; multiplayer unavailable (offline). |
 | Halo: Campaign Evolved | Yes | Playable; may remain running after quitting. ([user report](https://github.com/domsvoboda/xodus-nexus/issues/97)) |
 | Resonance: A Plague Tale Legacy | Yes | Playable; black screen reported when ending a game on Steam Deck. ([user report](https://docs.google.com/spreadsheets/d/1HD8fr8XotC2o0seA5TRaiZ3TeltdyUv5aWhxSPeD-6s/edit?usp=sharing)) |
 | Resident Evil 2 | Yes | Playable; may remain running after quitting. ([user report](https://github.com/domsvoboda/xodus-nexus/issues/110)) |

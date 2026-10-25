@@ -1,9 +1,24 @@
 import { expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AccountGames, Cover, GameLaunchToolFields, GameTitle, HomePage, LibraryPagination, LibraryProductCard, StoreProductCard, Sidebar, type LibraryFilters } from './App';
+import { readFileSync } from 'node:fs';
+import { AccountGames, Cover, GameLaunchToolFields, GameTitle, HomePage, LibraryPagination, LibraryProductCard, StoreProductCard, Sidebar, SettingsPage, type LibraryFilters } from './App';
 import { defaultLaunchTools } from '../shared/launch-tools';
 import { demoSnapshot } from '../shared/demo-data';
 import type { AccountLibraryPage } from '../shared/types';
+
+it('keeps unknown-source counts in diagnostics instead of rendering a technical library banner', () => {
+  const source = readFileSync('src/renderer/App.tsx', 'utf8');
+  const library = source.slice(source.indexOf('export function AccountGames('), source.indexOf('function AccountGamesForUser('));
+  expect(library).not.toContain('unclassifiedEntitlements');
+  expect(library).not.toContain('Some active licenses have an unrecognized source');
+  // Actual failures and incomplete results still need a visible way to debug.
+  expect(library).toContain('visible?.skippedEntitlements || visible?.excludedEntitlements');
+  expect(library).toContain('Some license records could not be verified and were omitted.');
+  expect(library).toContain('{error ?');
+  expect(library).toContain('<BackendLogButton toast={toast} />');
+  const settings = renderToStaticMarkup(<SettingsPage data={demoSnapshot()} toast={() => {}} />);
+  expect(settings).toContain('Open backend diagnostic log');
+});
 
 it.each(['supported', 'unsupported', 'unknown'] as const)('uses the Store %s badge in Owned without enabling unsupported installs', installability => {
   const product: AccountLibraryPage['products'][number] = { productId: '9AAAAAAAAAAA', title: 'Owned & game', access: 'owned',
@@ -23,6 +38,17 @@ it('keeps one My Library and Store navigation, no separate Game Pass page',()=>{
   const html=renderToStaticMarkup(<Sidebar data={demoSnapshot()} page="library" go={()=>{}} />);
   expect(html).toContain('My Library'); expect(html).toContain('Store');
   expect(html).not.toContain('<span>Game Pass</span>');
+});
+
+it('labels other active access honestly and offers it alongside All games', () => {
+  const product: AccountLibraryPage['products'][number] = { productId: '9AAAAAAAAAAA', title: 'Other game', access: 'other', description: '', categories: [], installability: 'supported', supportNote: '' };
+  const card = renderToStaticMarkup(<LibraryProductCard product={product} present={false} downloading={false} canInstall install={() => {}} />);
+  expect(card).toContain('<span>Other access</span>');
+  expect(card).not.toContain('<span>Owned</span>'); expect(card).not.toContain('<span>Game Pass</span>');
+  expect(card).not.toContain('disabled=""');
+  const all = renderToStaticMarkup(<AccountGames data={demoSnapshot()} toast={() => {}} />);
+  expect(all).toContain('<option value="all" selected="">All games</option>');
+  expect(all).toContain('<option value="other">Other access</option>');
 });
 
 it('counts waiting installations in the queue shortcut while a game is running', () => {

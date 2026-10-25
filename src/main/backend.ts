@@ -67,6 +67,10 @@ export class BackendManager {
         capabilities.streamingControls = Boolean(capabilities.streamingProgressJson && /(?:^|\s)--control-stdin(?:\s|$)/m.test(streaming.output));
         capabilities.streamingBandwidthLimit = Boolean(capabilities.streamingControls && /(?:^|\s)--download-limit-kib(?:\s|$)/m.test(streaming.output));
         capabilities.packageSelection = streaming.code === 0 && capabilities.commands.includes('resolve-package') && /(?:^|\s)--selected-content-id(?:\s|$)/m.test(streaming.output);
+        if (capabilities.packageSelection) {
+          const help = await run(binaryPath, ['resolve-package', '--help'], { maxOutput: 100_000 });
+          capabilities.contentPackageSelection = help.code === 0 && /(?:^|\s)--include-dlc(?:\s|$)/m.test(help.output);
+        }
       }
       return capabilities.login && capabilities.streaming ? capabilities : null;
     } catch { return null; }
