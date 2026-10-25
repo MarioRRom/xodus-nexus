@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
   game: undefined as undefined | { finish: (code?: number, output?: string) => void },
-  quit: vi.fn(),
+  quit: vi.fn(), maximize: vi.fn(),
   blockDisplay: vi.fn(() => 7), releaseDisplay: vi.fn(() => true),
   steamProfiles: [] as string[], steamIsRunning: true,
   liveImport: vi.fn(), offlineImport: vi.fn(), showMessage: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock('electron', () => ({
     whenReady: () => Promise.resolve(), getVersion: () => '0.0.0', isPackaged: false, quit: h.quit },
   ipcMain: { handle: (name: string, callback: (...args: any[]) => any) => h.handlers.set(name, callback) },
   BrowserWindow: class { webContents = { on: vi.fn(), send: vi.fn(), setWindowOpenHandler: vi.fn() };
-    on() {} once() {} show() {} focus() {} isDestroyed() { return false; } async loadFile() {} },
+    on() {} once() {} show() {} focus() {} maximize = h.maximize; isDestroyed() { return false; } async loadFile() {} },
   screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
   dialog: { showMessageBox: h.showMessage, showSaveDialog: h.showSave }, nativeImage: {}, shell: { trashItem: h.trash }, powerSaveBlocker: { start: h.blockDisplay, stop: h.releaseDisplay },
 }));
@@ -148,6 +148,9 @@ beforeAll(async () => {
   });
   await import('./index.js');
   await vi.waitFor(() => expect(h.handlers.has('start-install')).toBe(true));
+  await new Promise(resolve=>setImmediate(resolve));
+  expect(h.maximize).toHaveBeenCalledOnce();
+  expect(h.quit).not.toHaveBeenCalled();
 });
 afterAll(async () => {
   h.game?.finish(); for (const job of h.downloads) job.finish(130);
