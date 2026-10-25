@@ -49,14 +49,15 @@ async function command(binary: string, request: SocialRequest, signal: AbortSign
   }finally{clearTimeout(timer);signal.removeEventListener('abort',stop);stderr='';}
 }
 
-/** No startup queries, disk cache, polling, automatic message retries or fake presence. */
+/** Short account-bound memory cache only, no startup queries, disk cache or message retries. */
 export class XboxSocial {
   private jobs=new Map<string,{controller:AbortController;result:Promise<unknown>}>();
+  private reads=new Map<string,{expires:number;value:unknown}>();
   private sending=false;
   private generation=0;
   private draining=new Set<Promise<unknown>>();
   constructor(private identity:()=>Identity|undefined,private reader:Reader=command){}
-  close():void{this.generation++;for(const job of this.jobs.values())job.controller.abort();this.jobs.clear();}
+  close(preserveReads=false):void{this.generation++;for(const job of this.jobs.values())job.controller.abort();this.jobs.clear();if(!preserveReads)this.reads.clear();}
   get busy():boolean{return this.draining.size>0;}
   async settled():Promise<void>{await Promise.allSettled([...this.draining]);}
   friends():Promise<XboxFriend[]>{return this.request({op:'friends'},parseXboxFriends);}
@@ -76,6 +77,10 @@ export class XboxSocial {
     const identity=this.identity();
     if(!identity)return Promise.reject(Error('Sign in and use a backend with Xbox friends and chat support.'));
     const key=JSON.stringify([identity.account,identity.binary,request.op,request.op==='friends'?'':request.xuid]);
+    if(request.op==='send')this.reads.delete(JSON.stringify([identity.account,identity.binary,'conversation',request.xuid]));
+    const cached=request.op==='send'?undefined:this.reads.get(key);
+    if(cached&&cached.expires>Date.now())return Promise.resolve(structuredClone(cached.value) as T);
+    this.reads.delete(key);
     const pending=this.jobs.get(key);if(pending)return pending.result as Promise<T>;
     if(this.jobs.size>=4)return Promise.reject(Error('Wait for the current Xbox requests to finish.'));
     const controller=new AbortController(),generation=this.generation;
@@ -89,7 +94,13 @@ export class XboxSocial {
         let value:{schema?:unknown;account?:unknown;result?:unknown};
         try{value=JSON.parse(output);}catch{throw Error('Invalid Xbox response.');}
         if(!value||value.schema!==1||value.account!==identity.account)throw Error('Xbox response does not match the signed-in account.');
-        return parse(value.result);
+        const parsed=parse(value.result);
+        if(request.op!=='send'){
+          // Bound sensitive in-memory data and never let callers mutate the cache.
+          while(this.reads.size>=12)this.reads.delete(this.reads.keys().next().value!);
+          this.reads.set(key,{expires:Date.now()+(request.op==='friends'?45_000:10_000),value:structuredClone(parsed)});
+        }
+        return parsed;
       }catch(error){
         if(controller.signal.aborted)throw Error('Xbox request was cancelled.');
         // A test/transport may throw arbitrary payloads. Only our fixed UI messages escape.
@@ -110,7 +121,7 @@ export class XboxSocialSessions {
   private sessions=new Map<number,XboxSocial>();
   constructor(private identity:()=>Identity|undefined){}
   client(id:number):XboxSocial{let value=this.sessions.get(id);if(!value){value=new XboxSocial(this.identity);this.sessions.set(id,value);}return value;}
-  closeClient(id:number):void{this.sessions.get(id)?.close();}
+  closeClient(id:number):void{this.sessions.get(id)?.close(true);}
   close():void{this.epoch++;for(const session of this.sessions.values())session.close();}
   get busy():boolean{return [...this.sessions.values()].some(value=>value.busy);}
   async settled():Promise<void>{await Promise.all([...this.sessions.values()].map(value=>value.settled()));}

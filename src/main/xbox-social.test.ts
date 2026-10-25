@@ -8,6 +8,31 @@ const identity={account:'synthetic@example.test',binary:'/fixture/backend'};
 const friend={xuid:'42',gamertag:'Example',presence:'unknown'};
 const output=(result:unknown,account=identity.account)=>JSON.stringify({schema:1,account,result});
 describe('explicit account-bound Xbox friends/chat',()=>{
+  it('reopens from bounded memory without refetching and expires before automatic refresh',async()=>{
+    vi.useFakeTimers();
+    try{
+      const read=vi.fn(async()=>output({friends:[friend]})),social=new XboxSocial(()=>identity,read);
+      const first=await social.friends();social.close(true);first[0].gamertag='Changed by caller';
+      expect((await social.friends())[0].gamertag).toBe('Example');expect(read).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(45_000);await social.friends();expect(read).toHaveBeenCalledTimes(2);
+      social.close();await social.friends();expect(read).toHaveBeenCalledTimes(3);
+    }finally{vi.useRealTimers();}
+  });
+  it('never reuses cached reads for another account or backend',async()=>{
+    let current=identity;
+    const read=vi.fn(async()=>output({friends:[friend]},current.account)),social=new XboxSocial(()=>current,read);
+    await social.friends();current={...identity,account:'other'};await social.friends();
+    current={...current,binary:'/other/backend'};await social.friends();expect(read).toHaveBeenCalledTimes(3);
+  });
+  it('invalidates cached conversation even when sending fails without acknowledgement',async()=>{
+    const read=vi.fn(async(_binary:string,request:SocialRequest)=>{
+      if(request.op==='send')throw Error('synthetic uncertain send');
+      return output({xuid:'42',messages:[],hasMore:false});
+    });
+    const social=new XboxSocial(()=>identity,read);
+    await social.conversation('42');await social.conversation('42');expect(read).toHaveBeenCalledOnce();
+    await expect(social.send('42','hello')).rejects.toThrow();await social.conversation('42');expect(read).toHaveBeenCalledTimes(3);
+  });
   it('does not call anything at construction or without a supported signed-in account',async()=>{
     const read=vi.fn();const social=new XboxSocial(()=>undefined,read);expect(read).not.toHaveBeenCalled();
     await expect(social.friends()).rejects.toThrow('Sign in');expect(read).not.toHaveBeenCalled();

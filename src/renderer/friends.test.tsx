@@ -15,7 +15,8 @@ it('shows honest capability and account prerequisites instead of fake friends or
 it('keeps the dock without an overlay, manual refresh button or permanent explanatory footer',()=>{
   const data=demoSnapshot();data.auth.stored=true;data.auth.running=false;data.backend.available=true;data.backend.capabilities.commands.push('social');
   const html=renderToStaticMarkup(<Friends data={data} close={()=>{}} />);
-  expect(html).toContain('Nothing is sent automatically');
+  expect(html).toContain('>Friends</h2>');expect(html).not.toContain('Nothing is sent automatically');
+  expect(html).toContain('friends-empty');expect(html).toContain('Your conversations');
   expect(html).not.toMatch(/desktop overlay|Ctrl\+Shift\+F10|Refresh friends|Refresh conversation|friends-limitation|Chat does not change/);
   expect(html).not.toMatch(/Invitation sent\.|<iframe|<webview/);
 });

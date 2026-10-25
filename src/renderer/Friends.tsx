@@ -108,13 +108,12 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
   const outgoing=data.social?.outgoing??[],incoming=data.social?.incoming??[];
   return <div className={docked?'friends-docked':'dialog-backdrop'} data-gamepad-layer>
     <section ref={dialog} className="friends-dialog" role="dialog" aria-modal={docked?undefined:true} aria-labelledby="friends-heading">
-      <header><h2 id="friends-heading">Xbox friends</h2><button data-gamepad-initial data-gamepad-cancel aria-label="Close friends" onClick={close}><X /></button></header>
+      <header><h2 id="friends-heading">Friends</h2>{busy?<span className="friends-loading" role="status"><LoaderCircle className="spin" /><span className="sr-only">Loading</span></span>:null}<button data-gamepad-initial data-gamepad-cancel aria-label="Close friends" onClick={close}><X /></button></header>
       {incoming.length||outgoing.length?<section className="friends-invitations" aria-label="Game invitations">
         {incoming.map(invite=><article key={invite.id}><div><strong>{invite.game}</strong><small>Invitation from {invite.sender}</small></div><button disabled={busy} onClick={()=>void invitationAction(()=>window.launcher.acceptGameInvite(invite.id))}>Accept</button></article>)}
         {outgoing.map(invite=><article key={invite.id}><div><strong>{invite.game}</strong><small>{invite.phase==='choosing'?'Choose a friend below, then send an invitation.':invite.phase==='sending'?'Waiting for the game to send the invitation…':invite.phase==='sent'?'Invitation sent.':invite.phase==='failed'?'The game could not confirm invitation delivery.':'Invitation cancelled.'}</small></div>{invite.phase==='choosing'?<><button disabled={busy||!selected} onClick={()=>selected&&void invitationAction(()=>window.launcher.chooseGameInviteRecipient(invite.id,selected.xuid))}>Invite {selected?.gamertag??'friend'}</button><button disabled={busy} onClick={()=>void invitationAction(()=>window.launcher.cancelGameInvite(invite.id))}>Cancel</button></>:null}</article>)}
       </section>:null}
       {!available?<p role="status">{data.auth.stored!==true?'Sign in to your Microsoft account in Settings first.':'This backend does not support Xbox friends and chat. Use a compatible Nexus backend.'}</p>:<>
-        {busy?<div className="friends-tools" role="status"><LoaderCircle className="spin" />Loading</div>:null}
         {error?<p className="friends-error" role="alert">{error}</p>:null}
         <div className="friends-columns">
           <aside aria-label="Friends list">
@@ -136,7 +135,7 @@ export function Friends({ data, close, docked=false }: { data: AppSnapshot; clos
               </div>
               <form onSubmit={event=>void send(event)}><label htmlFor="xbox-message">Message</label><textarea id="xbox-message" value={draft} maxLength={512} onChange={event=>setDraft(event.target.value)} disabled={sending} />
                 <small>{Array.from(draft).length}/256 characters</small><button type="submit" disabled={busy||uncertain||!xboxMessageText(draft)}><Send />Send</button></form>
-            </>:<p>Select a friend to open a conversation. Nothing is sent automatically.</p>}
+            </>:<div className="friends-empty"><UserRound aria-hidden="true" /><h3>Your conversations</h3><p>Select a friend to start chatting.</p></div>}
           </section>
         </div>
       </>}
