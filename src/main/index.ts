@@ -1700,20 +1700,25 @@ async function createWindow(): Promise<void> {
     ? windowState
     : { x: undefined as number | undefined, y: undefined as number | undefined,
         width: 1440, height: 900, maximized: false };
+  // On small screens (for example a Steam Deck with 1280x800 pixels),
+  // a window as large as the work area is still too tall: the window manager
+  // adds its title bar, and on Wayland the work area often includes the
+  // panel. Maximize instead, so that the window manager fits it.
+  const area = screen.getPrimaryDisplay().workArea;
+  const tooLarge = bounds.width >= area.width || bounds.height >= area.height;
   if (bounds.x === undefined) {
-    const primary = screen.getPrimaryDisplay();
-    bounds.width = Math.min(bounds.width, primary.workArea.width);
-    bounds.height = Math.min(bounds.height, primary.workArea.height);
-    bounds.x = primary.workArea.x + Math.floor((primary.workArea.width - bounds.width) / 2);
-    bounds.y = primary.workArea.y + Math.floor((primary.workArea.height - bounds.height) / 2);
+    bounds.width = Math.min(bounds.width, area.width);
+    bounds.height = Math.min(bounds.height, area.height);
+    bounds.x = area.x + Math.floor((area.width - bounds.width) / 2);
+    bounds.y = area.y + Math.floor((area.height - bounds.height) / 2);
   }
   mainWindow = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     x: bounds.x,
     y: bounds.y,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: Math.min(800, area.width),
+    minHeight: Math.min(600, area.height),
     backgroundColor: '#080a0c',
     title: 'Xodus Nexus',
     icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)),
@@ -1732,7 +1737,7 @@ async function createWindow(): Promise<void> {
   if (smokeScreenshot) mainWindow.webContents.on('console-message', (_event, level, message) => console.error(`Renderer console [${level}]`, message));
   if (!hiddenCapture) mainWindow.once('ready-to-show', () => mainWindow?.show());
   if (!hiddenCapture) {
-    if (windowState?.maximized) mainWindow.maximize();
+    if (windowState?.maximized || tooLarge) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
   mainWindow.on('closed', () => { mainWindow = null; });
