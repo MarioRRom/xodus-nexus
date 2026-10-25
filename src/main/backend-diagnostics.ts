@@ -8,9 +8,13 @@ import { contentLicenseDiagnostic, contentLicenseStages } from '../shared/conten
 import { transferDiagnostic, transferStages } from '../shared/transfer-failure.js';
 import { keyringSteps, keyringFailures, keyringBusErrors, type KeyringDiagnostic } from './keyring-diagnostic.js';
 
-const operations = new Set(['keyring', 'account', 'profile', 'achievements', 'library', 'login', 'logout', 'streaming', 'download', 'license', 'run', 'resolve-package', 'service', 'probe']);
+const operations = new Set(['keyring', 'account', 'profile', 'achievements', 'library', 'login', 'logout', 'streaming', 'download', 'license', 'run', 'resolve-package', 'service', 'probe', 'social']);
+const socialStages = new Set(['friends-http','conversation-http','send-http','conversation-response','friends-response',
+  'privacy-or-access-denied','sign-in-required','rate-limited','not-found','service-unavailable','request-unconfirmed',
+  'send-unconfirmed','invalid-response','response-size','response-read','account-changed']);
 const credentialStages = new Set(['keyring-unavailable', 'keyring-invalid-data', 'keyring-missing-data', 'keyring-write-verification', 'credential-io', 'device-authentication']);
 const stages = new Set([
+  ...socialStages,
   ...sessionStages,
   ...contentLicenseStages,
   ...transferStages,
@@ -133,7 +137,11 @@ export class BackendDiagnosticReader {
     const ticket = ticketFailureDiagnostic(line);
     const numeric = /^NEXUS_LIBRARY_DIAGNOSTIC_V1 ([a-z-]+) (\d{1,3}) (\d{1,6})$/.exec(line);
     const legacy = /^Account library unavailable \(([a-z-]+)\); credentials and installed games are unchanged\.$/.exec(line);
-    if (credential && credentialStages.has(credential[1])) stage = credential[1];
+    const social = /^NEXUS_SOCIAL_DIAGNOSTIC_V1 ([a-z-]+) ([1-5][0-9]{2})$/.exec(line);
+    const socialError = /^NEXUS_SOCIAL_ERROR_V1 ([a-z-]+)$/.exec(line);
+    if (social && this.operation === 'social' && ['friends-http','conversation-http','send-http'].includes(social[1])) { stage = social[1]; status = Number(social[2]); }
+    else if (socialError && this.operation === 'social' && socialStages.has(socialError[1])) stage = socialError[1];
+    else if (credential && credentialStages.has(credential[1])) stage = credential[1];
     else if (ticket && ['library', 'profile'].includes(this.operation)) { stage = ticket.stage; serviceCode = ticket.serviceCode; }
     else if (transfer && ['streaming', 'download'].includes(this.operation)) { stage = transfer.stage; status = transfer.status; }
     else if (content && ['streaming', 'download', 'license', 'run'].includes(this.operation)) { stage = content.stage; status = content.status; }

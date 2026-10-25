@@ -1032,6 +1032,7 @@ export default function App() {
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(() => loadLibraryFilters());
   const [librarySelection, setLibrarySelection] = useState<{ id: string }>();
   const [friendsOpen,setFriendsOpen]=useState(false);
+  useEffect(() => window.launcher.onOpenFriends(() => setFriendsOpen(true)), []);
 
   useEffect(() => {
     void window.launcher.getSnapshot().then((value) => { setData(value); setLoading(false); }).catch((error) => { setToast({ kind: 'error', message: errorMessage(error) }); setLoading(false); });

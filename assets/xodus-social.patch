@@ -10,12 +10,25 @@ index 5a66715..1e0e96d 100644
  pub mod game_activity;
  pub mod achievements;
  pub mod subscription;
+diff --git a/crates/xodus-cli/src/commands/profile.rs b/crates/xodus-cli/src/commands/profile.rs
+index bab4e91..2f8a2a9 100644
+--- a/crates/xodus-cli/src/commands/profile.rs
++++ b/crates/xodus-cli/src/commands/profile.rs
+@@ -18,7 +18,7 @@ pub(super) async fn bounded(mut response: reqwest::Response, limit: usize) -> Re
+     Ok(bytes)
+ }
+ 
+-fn picture_url(text: &str) -> Option<reqwest::Url> {
++pub(super) fn picture_url(text: &str) -> Option<reqwest::Url> {
+     let url = reqwest::Url::parse(text).ok()?;
+     let host = url.host_str()?;
+     if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.port().is_some()
 diff --git a/crates/xodus-cli/src/commands/social.rs b/crates/xodus-cli/src/commands/social.rs
 new file mode 100644
-index 0000000..1b9fec8
+index 0000000..5e9d73c
 --- /dev/null
 +++ b/crates/xodus-cli/src/commands/social.rs
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,268 @@
 +//! Explicit friend/chat operations. No background presence, account provisioning,
 +//! inbox read markers, automatic retries, invite fabrication or token output.
 +use std::{io::{self, Read}, process::ExitCode, time::Duration};
@@ -71,19 +84,26 @@ index 0000000..1b9fec8
 +        if !seen.insert(id.clone()) { return Err("friends-response"); }
 +        let gamertag = text(&person["gamertag"], 128).filter(|s| !s.trim().is_empty()).ok_or("friends-response")?;
 +        let presence = match person["presenceState"].as_str() { Some("Online") => "online", Some("Offline") => "offline", _ => "unknown" };
++        let avatar = person["displayPicRaw"].as_str().filter(|url| url.len() <= 4096)
++            .and_then(super::profile::picture_url).map(|url|url.to_string());
 +        result.push(json!({"xuid":id,"gamertag":gamertag,"presence":presence,
-+            "activity":text(&person["presenceText"],512)}));
++            "activity":text(&person["presenceText"],512),"avatarUrl":avatar}));
 +    }
 +    Ok(json!({"friends":result}))
 +}
 +fn conversation(value: &Value, expected: &str) -> Result<Value, &'static str> {
 +    if value["networkId"] != "Xbox" || value["type"] != "OneToOne" { return Err("conversation-response"); }
-+    let members = value["participants"].as_array().ok_or("conversation-response")?;
-+    if members.len() != 2 || !members.iter().any(|p| p.as_str() == Some(expected))
-+        || members.iter().any(|p| xuid(p).is_err()) || members[0] == members[1] { return Err("conversation-response"); }
 +    let empty = Vec::new();
 +    let messages = if value["messages"].is_null() { &empty } else { value["messages"].as_array().ok_or("conversation-response")? };
 +    if messages.len() > 100 { return Err("conversation-response"); }
++    // Xbox omits participants for a successful, empty one-to-one thread.
++    // Do not invent members or relax sender validation for nonempty threads.
++    let members = if value["participants"].is_null() && messages.is_empty() { &empty }
++        else { value["participants"].as_array().ok_or("conversation-response")? };
++    if !value["participants"].is_null() || !messages.is_empty() {
++        if members.len() != 2 || !members.iter().any(|p| p.as_str() == Some(expected))
++            || members.iter().any(|p| xuid(p).is_err()) || members[0] == members[1] { return Err("conversation-response"); }
++    }
 +    let mut result = Vec::new();
 +    let mut seen = std::collections::HashSet::new();
 +    for message in messages {
@@ -125,11 +145,14 @@ index 0000000..1b9fec8
 +    if let Some(body) = plan.body { request = request.json(&body); }
 +    let response = request.send().await.map_err(|_| "request-unconfirmed")?;
 +    let status = response.status().as_u16();
++    let scope=match op {Operation::Friends=>"friends-http",Operation::Conversation(_)=>"conversation-http",Operation::Send(_,_)=>"send-http"};
++    eprintln!("NEXUS_SOCIAL_DIAGNOSTIC_V1 {scope} {status}");
 +    if status != 200 && status != 201 { return Err(match status {
 +        401 => "sign-in-required", 403 => "privacy-or-access-denied", 404 => "not-found", 429 => "rate-limited", _ => "service-unavailable",
 +    }); }
 +    let bytes = super::profile::bounded(response,LIMIT).await?;
-+    payload(op,&serde_json::from_slice(&bytes).map_err(|_| "invalid-response")?)
++    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "invalid-response")?;
++    payload(op,&value)
 +}
 +pub async fn run(tokens: &TokenManager) -> ExitCode {
 +    let mut bytes = Vec::new();
@@ -150,6 +173,20 @@ index 0000000..1b9fec8
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++    #[test]
++    fn social_empty_conversation_can_omit_participants_without_inventing_messages_or_identity() {
++        for value in [json!({"networkId":"Xbox","type":"OneToOne","participants":null,"messages":[]}),
++            json!({"networkId":"Xbox","type":"OneToOne","messages":[]})] {
++            assert_eq!(conversation(&value,"42").unwrap(),json!({"xuid":"42","messages":[],"hasMore":false}));
++        }
++        for value in [json!({"networkId":"other","type":"OneToOne","messages":[]}),
++            json!({"networkId":"Xbox","type":"Group","messages":[]}),
++            json!({"networkId":"Xbox","type":"OneToOne","participants":["43","44"],"messages":[]}),
++            json!({"networkId":"Xbox","type":"OneToOne","participants":[],"messages":[]}),
++            json!({"networkId":"Xbox","type":"OneToOne","messages":[{"sender":"42"}]})] {
++            assert!(conversation(&value,"42").is_err());
++        }
++    }
 +    #[test]
 +    fn social_input_rejects_arbitrary_endpoints_and_invalid_ids_before_authentication() {
 +        for v in [json!({}),json!({"op":"invite"}),json!({"op":"friends","url":"https://evil.invalid"}),
@@ -172,6 +209,17 @@ index 0000000..1b9fec8
 +        let result=friends(&value).unwrap();assert_eq!(result["friends"][0]["presence"],"unknown");
 +        assert!(!result.to_string().contains("PRIVATE"));assert!(friends(&json!({"people":[{},{}]})).is_err());
 +        let mut duplicate=value.clone();duplicate["people"].as_array_mut().unwrap().push(value["people"][0].clone());assert!(friends(&duplicate).is_err());
++    }
++    #[test]
++    fn social_friend_picture_is_optional_and_only_uses_exact_trusted_image_hosts() {
++        for (url, allowed) in [("https://images-eds-ssl.xboxlive.com/image?format=png",true),
++            ("https://gamerpic.xboxlive.com/avatar.png",true),("http://images-eds-ssl.xboxlive.com/a",false),
++            ("https://images-eds-ssl.xboxlive.com.evil.test/a",false),("file:///private",false),
++            ("https://secret@images-eds-ssl.xboxlive.com/a",false),("https://127.0.0.1/a",false)] {
++            let value=json!({"people":[{"xuid":"42","gamertag":"Example","displayPicRaw":url}]});
++            let result=friends(&value).unwrap();
++            assert_eq!(result["friends"][0]["avatarUrl"].is_string(),allowed);
++        }
 +    }
 +    #[test]
 +    fn social_chat_preserves_safety_filters_and_never_fetches_media() {
@@ -229,6 +277,25 @@ index 0000000..1b9fec8
 +            }
 +        }
 +    }
++    #[tokio::test]
++    async fn social_http_accepts_empty_thread_without_participants_and_never_posts_a_read_marker() {
++        use std::{net::TcpListener,io::{Read,Write},thread};
++        let listener=TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();
++        let task=thread::spawn(move||{
++            let(mut socket,_)=listener.accept().unwrap();socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
++            let mut bytes=Vec::new();let mut chunk=[0;1024];
++            while !bytes.windows(4).any(|b|b==b"\r\n\r\n") {let n=socket.read(&mut chunk).unwrap();assert!(n>0);bytes.extend_from_slice(&chunk[..n]);assert!(bytes.len()<4096);}
++            let body=r#"{"networkId":"Xbox","type":"OneToOne","participants":null,"messages":[]}"#;
++            write!(socket,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
++            String::from_utf8(bytes).unwrap()
++        });
++        let op=Operation::Conversation("42".into());
++        let client=reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(2)).build().unwrap();
++        let result=call(&client,"SYNTHETIC_NO_TOKEN",&op,Plan{url:format!("http://{address}/thread?maxItems=100"),contract:"1",body:None}).await.unwrap();
++        assert_eq!(result,json!({"xuid":"42","messages":[],"hasMore":false}));
++        let captured=task.join().unwrap();assert!(captured.starts_with("GET /thread?maxItems=100 HTTP/1.1\r\n"));
++        assert!(!captured.contains("horizon"));assert!(!captured.contains("parts"));
++    }
 +}
 diff --git a/crates/xodus-cli/src/main.rs b/crates/xodus-cli/src/main.rs
 index 48e8878..ea6f6d9 100644
@@ -262,4 +329,3 @@ index 48e8878..ea6f6d9 100644
          SubCommand::GameActivity { title_id, json } => commands::game_activity::run(&tokens, title_id, json).await,
          SubCommand::Achievements { title_id, json } => commands::achievements::run(&tokens, title_id, json).await,
          SubCommand::Login => commands::login::run(&client, &tokens).await,
-

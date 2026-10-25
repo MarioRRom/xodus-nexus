@@ -10,8 +10,11 @@ const api: LauncherApi = {
   chooseGameInviteRecipient: (id,xuid) => ipcRenderer.invoke('game-invite-choose',id,xuid),
   cancelGameInvite: id => ipcRenderer.invoke('game-invite-cancel',id),
   acceptGameInvite: id => ipcRenderer.invoke('game-invite-accept',id),
-  toggleSocialOverlay: () => ipcRenderer.invoke('social-overlay-toggle'),
-  closeSocialOverlay: () => ipcRenderer.invoke('social-overlay-close'),
+  onOpenFriends: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('open-friends', listener);
+    return () => ipcRenderer.removeListener('open-friends', listener);
+  },
   getXboxFriends: () => ipcRenderer.invoke('xbox-friends'),
   getXboxConversation: xuid => ipcRenderer.invoke('xbox-conversation', xuid),
   sendXboxMessage: (xuid, text) => ipcRenderer.invoke('xbox-send-message', xuid, text),

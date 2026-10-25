@@ -1,4 +1,4 @@
-export interface XboxFriend { xuid: string; gamertag: string; presence: 'online' | 'offline' | 'unknown'; activity?: string }
+export interface XboxFriend { xuid: string; gamertag: string; presence: 'online' | 'offline' | 'unknown'; activity?: string; avatarUrl?: string }
 export interface XboxChatMessage { id: string; sender: string; at: string; text?: string; hidden: boolean }
 export interface XboxConversation { xuid: string; messages: XboxChatMessage[]; hasMore: boolean }
 export type SocialRequest = { op: 'friends' } | { op: 'conversation'; xuid: string } | { op: 'send'; xuid: string; text: string };
@@ -11,6 +11,31 @@ export function xboxMessageText(value: unknown): value is string {
 }
 const label = (s: unknown, max: number): s is string => typeof s === 'string' && Array.from(s).length <= max && !/[\x00-\x1f\x7f]/.test(s);
 
+export function xboxAvatarUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 4096) return;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && !url.username && !url.password && !url.port &&
+      ['gamerpic.xboxlive.com','images-eds-ssl.xboxlive.com','avatar-ssl.xboxlive.com','xboxavatargamerpic.azureedge.net'].includes(url.hostname)) return url.href;
+  } catch { /* An optional image must not make the friends list unusable. */ }
+}
+
+export const xboxSocialErrors = {
+  denied:'Xbox denied this request. Check your account privacy and communication permissions.',
+  signIn:'Xbox requires sign-in again. Open Settings to check your account.',
+  limited:'Xbox is limiting requests. Wait before refreshing again.',
+  notFound:'This conversation is not available from Xbox.',
+  invalid:'Xbox returned an unsupported conversation response.',
+  unavailable:'Xbox social services are unavailable. Try again later.',
+  changed:'The account or backend changed. Open Friends again.',
+} as const;
+/** Electron may prefix an IPC error. Never expose any other raw error text. */
+export function xboxSocialError(error: unknown, fallback = xboxSocialErrors.unavailable): string {
+  const message = error instanceof Error ? error.message : '';
+  for (const safe of Object.values(xboxSocialErrors)) if(message === safe || /^Error invoking remote method 'xbox-[a-z-]+': Error: /.test(message) && message.split(': Error: ').slice(1).join(': Error: ') === safe) return safe;
+  return fallback;
+}
+
 /** Explicit field projection. Backend data and account identifiers never become markup or URLs. */
 export function parseXboxFriends(value: unknown): XboxFriend[] {
   const friends=(value as {friends?:unknown} | null)?.friends;
@@ -20,7 +45,9 @@ export function parseXboxFriends(value: unknown): XboxFriend[] {
     if(!friend||!xboxUserId(friend.xuid)||seen.has(friend.xuid)||!label(friend.gamertag,128)||!friend.gamertag.trim()
       || !['online','offline','unknown'].includes(friend.presence) || (friend.activity!=null&&!label(friend.activity,512))) throw Error('Invalid friends response.');
     seen.add(friend.xuid);
-    return {xuid:friend.xuid,gamertag:friend.gamertag,presence:friend.presence,activity:friend.activity??undefined};
+    const result: XboxFriend = {xuid:friend.xuid,gamertag:friend.gamertag,presence:friend.presence,activity:friend.activity??undefined};
+    const avatar = xboxAvatarUrl(friend.avatarUrl); if(avatar) result.avatarUrl = avatar;
+    return result;
   });
 }
 export function parseXboxConversation(value: unknown, expected: string): XboxConversation {

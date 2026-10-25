@@ -65,11 +65,9 @@ Flatpak version available through Discover. Other browsers are not supported.
 
 ## Xbox friends and chat (experimental)
 
-Open **Friends** in the bottom-right corner for your Xbox friends list, text conversations and game invitations. Chat requires a compatible Nexus backend and your account's communication permissions. Refresh to load new messages. If delivery cannot be confirmed, refresh the conversation before sending again.
+Open **Friends** in the bottom-right corner for your Xbox friends list, text conversations and game invitations. Chat requires a compatible Nexus backend and your account's communication permissions. The visible panel refreshes conversations automatically. If delivery cannot be confirmed, check the conversation before sending again.
 
 Invitations require a compatible Nexus runtime and a running game. Use the game's **Invite friends** action to choose a friend, or select **Invite to game** when the game has published a joinable activity. Incoming invitations appear in Friends and can be accepted there. This does not add multiplayer support to games that cannot connect to their services.
-
-The pop-out button opens an experimental desktop overlay and enables **Ctrl+Shift+F10** to show or hide it, where supported by your desktop. **Escape** closes it. Your desktop may ask permission for the shortcut. Exclusive fullscreen and Steam Game Mode can prevent the overlay from appearing; use windowed or borderless mode, or switch back to the launcher. Nexus does not inject an overlay into the game.
 
 ## Wallet setup and unlocking
 

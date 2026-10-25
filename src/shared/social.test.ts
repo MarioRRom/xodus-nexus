@@ -1,8 +1,21 @@
 import { describe,expect,it } from 'vitest';
-import { parseXboxFriends,parseXboxConversation,xboxUserId,xboxMessageText } from './social.js';
+import { parseXboxFriends,parseXboxConversation,xboxUserId,xboxMessageText,xboxAvatarUrl,xboxSocialError,xboxSocialErrors } from './social.js';
 const friend={xuid:'42',gamertag:'<Example>',presence:'online',activity:'A game'};
 const message={id:'one',sender:'42',at:'2026-10-25T00:00:00Z',hidden:false,text:'<script>plain</script>'};
 describe('Xbox social boundaries',()=>{
+  it('keeps only allowlisted HTTPS profile pictures and never arbitrary remote URLs',()=>{
+    for(const value of ['https://images-eds-ssl.xboxlive.com/image','https://gamerpic.xboxlive.com/avatar.png'])expect(xboxAvatarUrl(value)).toBe(value);
+    for(const value of ['https://images-eds-ssl.xboxlive.com.evil.test/a','http://gamerpic.xboxlive.com/a','https://secret@gamerpic.xboxlive.com/a','file:///tmp/a','data:image/svg+xml,<svg/>','https://127.0.0.1/a','https://gamerpic.xboxlive.com:8443/a',null])expect(xboxAvatarUrl(value)).toBeUndefined();
+    expect(parseXboxFriends({friends:[{...friend,avatarUrl:'https://gamerpic.xboxlive.com/a'}]})[0].avatarUrl).toBe('https://gamerpic.xboxlive.com/a');
+    expect(parseXboxFriends({friends:[{...friend,avatarUrl:'https://evil.test/a'}]})[0].avatarUrl).toBeUndefined();
+  });
+  it('shows only fixed actionable errors, including Electron IPC prefixes',()=>{
+    for(const safe of Object.values(xboxSocialErrors)){
+      expect(xboxSocialError(Error(safe))).toBe(safe);
+      expect(xboxSocialError(Error(`Error invoking remote method 'xbox-conversation': Error: ${safe}`))).toBe(safe);
+    }
+    for(const raw of ['PRIVATE_TOKEN',xboxSocialErrors.denied+' private@example.test',`prefix ${xboxSocialErrors.denied}`])expect(xboxSocialError(Error(raw))).toBe(xboxSocialErrors.unavailable);
+  });
   it.each(['0','01','-1','18446744073709551616','42/../../','42?token=x',42,null,''])('rejects invalid user %s',v=>expect(xboxUserId(v)).toBe(false));
   it.each(['1','42','18446744073709551615'])('keeps uint64 user %s lossless',v=>expect(xboxUserId(v)).toBe(true));
   it('validates message text by Unicode code points and never accepts controls or empty text',()=>{

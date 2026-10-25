@@ -50,19 +50,25 @@ test('Xbox friends/chat is explicit and account-bound without modifying login, s
   assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
   assert.ok(lock.patches.findIndex(p=>p.file===entry.file)>lock.patches.findIndex(p=>p.file==='xodus-session-recovery.patch'));
   assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(m=>m[1]).sort(),[
-    'crates/xodus-cli/src/commands.rs','crates/xodus-cli/src/commands/social.rs','crates/xodus-cli/src/main.rs',
+    'crates/xodus-cli/src/commands.rs','crates/xodus-cli/src/commands/profile.rs','crates/xodus-cli/src/commands/social.rs','crates/xodus-cli/src/main.rs',
   ]);
   for(const name of ['social_input_rejects_arbitrary_endpoints_and_invalid_ids_before_authentication',
     'social_plans_use_only_exact_https_hosts_and_no_retry_or_identity_impersonation',
     'social_friends_keep_unknown_presence_honest_and_drop_private_server_fields',
     'social_chat_preserves_safety_filters_and_never_fetches_media',
     'social_send_success_requires_actual_service_acknowledgement',
-    'social_http_uses_one_explicit_request_and_honors_denials_without_retry'])assert.ok(patch.includes(name),name);
+    'social_http_uses_one_explicit_request_and_honors_denials_without_retry',
+    'social_empty_conversation_can_omit_participants_without_inventing_messages_or_identity',
+    'social_friend_picture_is_optional_and_only_uses_exact_trusted_image_hosts',
+    'social_http_accepts_empty_thread_without_participants_and_never_posts_a_read_marker'])assert.ok(patch.includes(name),name);
   const production=patch.split('+#[cfg(test)]')[0];
   assert.ok(production.includes('super::profile::xbox_session(tokens)'));
   assert.ok(production.includes('username != account'));
   assert.ok(production.includes('16385'));
   assert.ok(production.includes('unsuitableFor'));
+  assert.ok(production.includes('value["participants"].is_null() && messages.is_empty()'));
+  assert.ok(production.includes('NEXUS_SOCIAL_DIAGNOSTIC_V1 {scope} {status}'));
+  assert.ok(!patch.includes('NEXUS_PRIVATE_SOCIAL_SHAPE'));
   assert.doesNotMatch(production,/\.read_to_string\(|allow_invalid|danger_accept|mark.read|readHorizon|\.delete\(|ensure_device_credentials|NEXUS_.*token/i);
   assert.ok((await fs.readFile('scripts/build-backend.mjs','utf8')).includes("'social'"));
 });

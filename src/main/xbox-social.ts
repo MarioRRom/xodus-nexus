@@ -1,5 +1,5 @@
 import { spawnTracked } from './process.js';
-import { parseXboxFriends, parseXboxConversation, xboxMessageText, xboxUserId, type SocialRequest, type XboxConversation, type XboxFriend } from '../shared/social.js';
+import { parseXboxFriends, parseXboxConversation, xboxMessageText, xboxUserId, xboxSocialErrors, type SocialRequest, type XboxConversation, type XboxFriend } from '../shared/social.js';
 
 type Identity = { account: string; binary: string };
 type Reader = (binary: string, request: SocialRequest, signal: AbortSignal) => Promise<string>;
@@ -8,8 +8,9 @@ const failures: Record<string,string> = {
   'sign-in-required':'Xbox requires sign-in again. Open Settings to check your account.',
   'rate-limited':'Xbox is limiting requests. Wait before refreshing again.',
   'not-found':'This conversation is not available from Xbox.',
+  'conversation-response':xboxSocialErrors.invalid,
 };
-const uiErrors = new Set([...Object.values(failures),
+const uiErrors = new Set([...Object.values(failures),...Object.values(xboxSocialErrors),
   'Message delivery could not be confirmed. Refresh the conversation before trying again.',
   'Message delivery could not be confirmed. Refresh before trying again.',
   'Xbox social services are unavailable. Try again later.',

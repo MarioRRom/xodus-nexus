@@ -6,6 +6,15 @@ import { spawn } from 'node:child_process';
 import { BackendDiagnostics, BackendDiagnosticReader, observeBackendChild, setBackendDiagnostics } from './backend-diagnostics.js';
 import { spawnTracked } from './process.js';
 
+it('records social HTTP status and fixed failure stages without friends, message bodies or tokens',()=>{
+  const records:unknown[]=[];const reader=new BackendDiagnosticReader('social',r=>records.push(r));
+  reader.push(Buffer.from('NEXUS_SOCIAL_DIAGNOSTIC_V1 conversation-http 200\nNEXUS_SOCIAL_ERROR_V1 conversation-response\n'));
+  reader.push(Buffer.from('NEXUS_SOCIAL_ERROR_V1 private-peer\nNEXUS_SOCIAL_DIAGNOSTIC_V1 conversation-http 200 private-token\nPRIVATE MESSAGE\n'));
+  expect(records).toEqual([{operation:'social',event:'diagnostic',stage:'conversation-http',status:200,skipped:undefined,serviceCode:undefined},
+    {operation:'social',event:'diagnostic',stage:'conversation-response',status:undefined,skipped:undefined,serviceCode:undefined}]);
+  const wrong:unknown[]=[];new BackendDiagnosticReader('run',r=>wrong.push(r)).push(Buffer.from('NEXUS_SOCIAL_ERROR_V1 conversation-response\n'));expect(wrong).toEqual([]);
+});
+
 it('records only fixed keyring failure metadata, never collection paths or provider text (#329)', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-keyring-diagnostic-'));
   try {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
 import { constants, createWriteStream, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -61,7 +61,6 @@ import { addLiveSteamShortcut } from './steam-live.js';
 import { DownloadCompletionNotifications } from './download-notifications.js';
 import { KeyringSupport } from './keyring.js';
 import { XboxSocialSessions } from './xbox-social.js';
-import { desktopOverlayOptions, SocialOverlayWindow } from './social-overlay.js';
 import { GameInviteBridge, combinedInviteState } from './game-invite-bridge.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
@@ -77,24 +76,10 @@ const downloadNotifications = new DownloadCompletionNotifications({
   },
 });
 let mainWindow: BrowserWindow | null = null;
-let socialWindow: BrowserWindow | undefined;
-const socialOverlay=new SocialOverlayWindow(async()=>{
-  const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  const window=new BrowserWindow(desktopOverlayOptions(area,path.join(__dirname,'..','preload','index.cjs')));
-  socialWindow=window;
-  const socialId=window.webContents.id;
-  window.setAlwaysOnTop(true,'floating');
-  window.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  window.webContents.on('will-navigate',event=>event.preventDefault());
-  window.webContents.on('will-attach-webview',event=>event.preventDefault());
-  window.on('closed',()=>{xboxSocial.closeClient(socialId);if(socialWindow===window)socialWindow=undefined;});
-  try{
-    if(process.env.VITE_DEV_SERVER_URL)await window.loadURL(process.env.VITE_DEV_SERVER_URL+'#social-overlay');
-    else await window.loadFile(path.join(__dirname,'..','..','dist','index.html'),{hash:'social-overlay'});
-    return window;
-  }catch{window.destroy();throw Error('The desktop overlay could not be loaded.');}
-},()=>{if(socialWindow&&!socialWindow.isDestroyed())xboxSocial.closeClient(socialWindow.webContents.id);});
+async function showFriends(): Promise<void> {
+  await showLauncher();
+  mainWindow?.webContents.send('open-friends');
+}
 let store: StateStore;
 let backend: BackendManager;
 let backendDiagnostics: BackendDiagnostics;
@@ -293,7 +278,6 @@ function emitSnapshot(): void {
   if (snapshotTimer) clearTimeout(snapshotTimer);
   snapshotTimer = undefined;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('snapshot', snapshot());
-  if (socialWindow && !socialWindow.isDestroyed()) socialWindow.webContents.send('snapshot', snapshot());
 }
 
 function scheduleSnapshot(): void {
@@ -981,9 +965,9 @@ async function prepareGameLaunch(id: string): Promise<void> {
     }
     if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&await gameInviteRuntime(wine)){
       const account=authState.username,epoch=xboxSocial.epoch;
-      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch,emitSnapshot,()=>{void socialOverlay.show().catch(()=>{});},Date.now,sender=>{
+      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
         if(!Notification.isSupported())return;
-        try{const notice=new Notification({title:'Game invitation',body:`${sender} invited you to ${game.title}. Open Friends to accept.`,urgency:'normal'});notice.on('click',()=>{void socialOverlay.show().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
+        try{const notice=new Notification({title:'Game invitation',body:`${sender} invited you to ${game.title}. Open Friends to accept.`,urgency:'normal'});notice.on('click',()=>{void showFriends().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
       });
       try{
         await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
@@ -1308,7 +1292,7 @@ function registerIpc(): void {
   });
   ipcMain.handle('account-refresh', () => refreshAccount());
   const socialClient=(event:Electron.IpcMainInvokeEvent)=>{
-    if(event.sender!==mainWindow?.webContents&&event.sender!==socialWindow?.webContents)throw Error('Unknown social window.');
+    if(event.sender!==mainWindow?.webContents)throw Error('Unknown social window.');
     if(event.senderFrame!==event.sender.mainFrame)throw Error('Unknown social frame.');
     return xboxSocial.client(event.sender.id);
   };
@@ -1316,12 +1300,6 @@ function registerIpc(): void {
   ipcMain.handle('xbox-conversation', (event, xuid: unknown) => socialClient(event).conversation(xuid));
   ipcMain.handle('xbox-send-message', (event, xuid: unknown, text: unknown) => socialClient(event).send(xuid, text));
   ipcMain.handle('xbox-social-close', event => socialClient(event).close());
-  ipcMain.handle('social-overlay-toggle', async event => {
-    socialClient(event);
-    if(!globalShortcut.isRegistered('Control+Shift+F10'))globalShortcut.register('Control+Shift+F10',()=>{void socialOverlay.toggle().catch(()=>{});});
-    await socialOverlay.toggle();
-  });
-  ipcMain.handle('social-overlay-close', event => {socialClient(event);socialOverlay.hide();});
   const invitation=(event:Electron.IpcMainInvokeEvent,id:unknown)=>{
     socialClient(event);if(typeof id!=='string'||id.length>160)throw Error('Invalid invitation.');
     const bridge=[...gameInviteBridges.values()].find(value=>id.startsWith(value.id+':'));
@@ -1751,7 +1729,7 @@ async function createWindow(): Promise<void> {
     if (windowState?.maximized) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
-  mainWindow.on('closed', () => { socialOverlay.dispose(); mainWindow = null; });
+  mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void openDesktopTarget(url, () => shell.openExternal(url))
       .catch(() => console.warn('Could not open the external browser.'));
@@ -1933,7 +1911,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !shortcutOnly) app.quit();
 });
 
-app.on('will-quit', () => {socialOverlay.dispose();globalShortcut.unregisterAll();gameDisplay.stop();});
+app.on('will-quit', () => {gameDisplay.stop();});
 
 app.on('before-quit', (event) => {
   xboxSocial.close();
