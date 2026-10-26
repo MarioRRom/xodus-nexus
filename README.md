@@ -26,7 +26,7 @@ Browse the Store, install games you own or can access through a subscription,
 and play with one shared runtime. Xbox sign-in and cloud saves are available
 for supported games.
 
-![Xodus Nexus demo](docs/screenshots/demo.gif?v=c2c5cd4c)
+![Xodus Nexus demo](docs/screenshots/demo.gif?v=bb1bc859)
 
 *Preview with sample account data.*
 
