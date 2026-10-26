@@ -53,6 +53,7 @@ import { authViewFactory } from './auth-window.js';
 import { browserAuthViewFactory } from './auth-browser.js';
 import { fallbackAuthViewFactory } from './auth-fallback.js';
 import { contentParentForChoice, InstallPlans, installSelection, readInstallPlan } from './install-plan.js';
+import { availableInstallBytes } from './install-storage.js';
 import { adoptLauncherFonts } from './launcher-fonts.js';
 import { externalLauncherEnvironment } from './launcher-environment.js';
 import { openDesktopTarget } from './desktop-open.js';
@@ -1381,13 +1382,14 @@ function registerIpc(): void {
   ipcMain.handle('save-diagnostic-report', (_event, content: unknown) => saveReviewedReport(content));
   ipcMain.handle('catalog-featured', () => catalog.featured(catalogMarket()));
   ipcMain.handle('start-install', (_event, request: InstallRequest) => startInstall(request));
-  ipcMain.handle('install-plan', async (_event, raw: string) => {
+  ipcMain.handle('install-plan', async (_event, raw: string, destination?: string) => {
     const binary = requireBackend('streaming');
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings to choose installation packages.');
     const productId = safeProductId(raw), market = currentMarket();
+    const availableBytes = destination === undefined ? undefined : await availableInstallBytes(destination);
     const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try again.');
-    return plan;
+    return { ...plan, availableBytes };
   });
   ipcMain.handle('game-content', async (_event, id: string) => (await gameContent(id)).plan);
   ipcMain.handle('install-game-content', (_event, id: string, productId: string) => installGameContent(id, productId));

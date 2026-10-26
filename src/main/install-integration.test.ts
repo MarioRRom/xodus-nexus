@@ -484,3 +484,13 @@ it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/down
   expect(h.notifications).toHaveLength(1); // no completion toast for cancelled/stopped jobs
   expect(h.releaseDisplay).toHaveBeenCalledWith(7);
 });
+
+it('adds fresh advisory target storage to public package preflight without creating a folder or starting a transfer (#247)', async () => {
+  const destination=path.join(h.root,'storage-preview','game'),before=h.downloads.length;
+  const plan=await ipc('install-plan','9AAAAAAAAAAA',destination);
+  expect(plan.availableBytes).toBeTypeOf('number');expect(plan.choices[0].supported).toBe(true);
+  expect(await fs.access(path.dirname(destination)).then(()=>true,()=>false)).toBe(false);
+  expect(h.downloads).toHaveLength(before);
+  await expect(ipc('install-plan','9AAAAAAAAAAA','relative')).rejects.toThrow('absolute path');
+  expect((await ipc('install-plan','9AAAAAAAAAAA')).availableBytes).toBeUndefined();
+});

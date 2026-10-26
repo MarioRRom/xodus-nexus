@@ -18,11 +18,17 @@ export function parseInstallPlan(output: string, productId: string, market: stri
     if (!item || !id(item.productId) || !cid(item.contentId) || !label(item.title) || !item.title
       || !label(item.platform) || !label(item.packageFormat) || !label(item.kind) || typeof item.supported !== 'boolean'
       || (item.parentProductId != null && !id(item.parentProductId)) || (item.mainPackageFamilyName != null && !family(item.mainPackageFamilyName))
+      || [item.downloadBytes, item.installBytes].some(value => value != null && (!Number.isSafeInteger(value) || value <= 0))
       || (item.supported && (item.platform !== 'Windows.Desktop' || item.packageFormat !== 'MSIXVC' || !['Game', 'GameAddOn', 'Durable'].includes(item.kind)))
       || (item.supported && item.kind === 'Durable' && (!id(item.parentProductId) || item.parentProductId === item.productId || !family(item.mainPackageFamilyName)))) throw Error('Invalid Store package choice.');
     const key = item.contentId;
     if (seen.has(key)) throw Error('Duplicate Store package choice.');
     seen.add(key);
+  }
+  // Size fields are advisory and optional for older compatible backends.
+  for (const item of plan.choices) {
+    if (item.downloadBytes === null) delete item.downloadBytes;
+    if (item.installBytes === null) delete item.installBytes;
   }
   const supported = plan.choices.filter((item: InstallPlan['choices'][number]) => item.supported);
   const status = supported.length === 1 && supported[0].kind === 'Game' ? 'ready' : supported.length ? 'choice' : 'unavailable';

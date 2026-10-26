@@ -249,6 +249,8 @@ export interface InstallChoice {
   supported: boolean;
   parentProductId?: string;
   mainPackageFamilyName?: string;
+  downloadBytes?: number;
+  installBytes?: number;
 }
 
 export interface InstallPlan {
@@ -257,6 +259,7 @@ export interface InstallPlan {
   market: string;
   status: 'ready' | 'choice' | 'unavailable';
   choices: InstallChoice[];
+  availableBytes?: number;
 }
 
 export interface GameContentItem {
@@ -397,7 +400,7 @@ export interface LauncherApi {
   getFeaturedCatalog(): Promise<CatalogSearchResult>;
   getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean): Promise<AccountLibraryPage>;
   startInstall(request: InstallRequest): Promise<string>;
-  getInstallPlan(productId: string): Promise<InstallPlan>;
+  getInstallPlan(productId: string, destination?: string): Promise<InstallPlan>;
   getGameContent(id: string): Promise<GameContentPlan>;
   installGameContent(id: string, productId: string): Promise<string>;
   updateInstalledGame(id: string): Promise<string>;

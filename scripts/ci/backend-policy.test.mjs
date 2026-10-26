@@ -508,3 +508,19 @@ test('outgoing chat reuses the current login identity with server-issued context
   assert.doesNotMatch(production,/\.save_|ensure_device_credentials|start_new_session|do_sisu\(|danger_accept|readHorizon|mark.read|\.delete\(|\/tmp\/|NEXUS_CHAT_(?:DIAG|BOUND)/i);
   assert.ok(sections.find(value=>value.includes(' b/crates/xodus-cli/src/commands/social.rs\n')).includes('chat_session::send(tokens, peer, message)'));
 });
+
+test('installation estimates are public metadata only and never replace actual download space checks (#247)', async () => {
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-package-storage.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/package_plan.rs']);
+  for(const name of ['MaxDownloadSizeInBytes','MaxInstallSizeInBytes','9_007_199_254_740_991',
+    'package_storage_estimates_are_optional_positive_and_bound_to_the_selected_content',
+    'package_storage_estimates_merge_retail_duplicates_without_using_trial_or_foreign_sizes'])assert.ok(patch.includes(name),name);
+  const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.doesNotMatch(added,/get_license|tokens\.|Authorization|\.send\(|\.save_|\.remove_|required_free_space|available_free_space/);
+  const storage=await fs.readFile('src/main/install-storage.ts','utf8');
+  assert.ok(storage.includes('fs.statfs(current, { bigint: true })'));
+  assert.doesNotMatch(storage,/\.mkdir\(|\.writeFile\(|\.rm\(|\.unlink\(/);
+});

@@ -44,6 +44,14 @@ describe('package preflight protocol', () => {
     const value = parse({ ...plan(), status: 'unavailable', choices: [{ ...choice, supported: false, platform: 'Xbox.One' }] });
     expect(() => installSelection(value, contentId)).toThrow();
   });
+  it('accepts optional bounded size estimates and preserves older backends without them', () => {
+    expect(parse(plan()).choices[0].downloadBytes).toBeUndefined();
+    const sized = {...plan(), choices:[{...choice, downloadBytes:2_069_975_040, installBytes:3_000_000_000}]};
+    expect(parse(sized).choices[0]).toMatchObject({downloadBytes:2_069_975_040,installBytes:3_000_000_000});
+    expect(parse({...plan(),choices:[{...choice,downloadBytes:null,installBytes:null}]}).choices[0]).toEqual(choice);
+    for (const field of ['downloadBytes','installBytes']) for (const value of [-1,0,1.5,Number.MAX_SAFE_INTEGER+1,'100',true,{},[]])
+      expect(()=>parse({...plan(),choices:[{...choice,[field]:value}]})).toThrow('Invalid Store package choice');
+  });
   it('runs only the public command, closes stdin and preserves UTF-8', async () => {
     const value = { ...plan(), choices: [{ ...choice, title: 'Příliš žluťoučký' }] };
     const cli = await executable(`if(JSON.stringify(process.argv.slice(2))!==JSON.stringify(['resolve-package','${root}','--json','--market','US']))process.exit(2); process.stdin.on('end',()=>{const b=Buffer.from(${JSON.stringify(JSON.stringify(value))});process.stdout.write(b.subarray(0,110));process.stdout.write(b.subarray(110));});process.stdin.resume();`);
