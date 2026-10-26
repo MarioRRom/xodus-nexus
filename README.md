@@ -206,4 +206,5 @@ LGPL 2.1 or later; its corresponding pinned source and build recipe accompany
 each runtime release.
 [Contributing](CONTRIBUTING.md)
 
-Community translations: [translation guide](docs/TRANSLATING.md).
+Community translations: [contribute on Tolgee](https://app.tolgee.io/projects/36162)
+or read the [translation guide](docs/TRANSLATING.md).

@@ -14,6 +14,8 @@
     "i18n:check": "node scripts/localization.mjs check",
     "i18n:export": "node scripts/localization.mjs export",
     "i18n:import": "node scripts/localization.mjs import",
+    "i18n:push": "npm run i18n:check && tolgee push --error-on-unresolved-conflict yes --override-mode ALL",
+    "i18n:pull": "node scripts/tolgee-pull.mjs",
     "test": "vitest run",
     "test:runtime-tools": "node --test scripts/eac-trace-summary.test.mjs scripts/wine-exception-metadata.test.mjs scripts/assemble-shared-runtime.test.mjs scripts/build-runtime-dxvk.test.mjs scripts/verify-runtime-base.test.mjs scripts/runtime-compat/staging.test.mjs scripts/runtime-tests/build-store-probes.test.mjs scripts/runtime-tests/build-user-privilege-probe.test.mjs scripts/runtime-tests/build-gamesave-sync-probe.test.mjs scripts/runtime-tests/build-user-audio-probe.test.mjs",
     "test:ci-tools": "node --test scripts/ci/*.test.mjs",
@@ -29,6 +31,7 @@
     "react-i18next": "17.1.9"
   },
   "devDependencies": {
+    "@tolgee/cli": "2.21.0",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
