@@ -6,6 +6,8 @@ import { installedEacRuntime } from './anti-cheat.js';
 import { prepareManagedPrefix } from './managed-prefix.js';
 import { systemGameLocale } from './game-locale.js';
 import { windowsGameLocale } from '../shared/game-language.js';
+import { prepareShaderCache } from './shader-cache.js';
+import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-cache.js';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -326,7 +328,9 @@ export async function syncUnrealCultureGameIni(
           ? `Pinned the Unreal text language to ${locale} via ${path.join(product, 'WinGDK', titleId, 'Saved', 'Config', 'WinGDK', 'Game.ini')}.`
           : `Removed the pinned Unreal text language from ${path.join(product, 'WinGDK', titleId, 'Saved', 'Config', 'WinGDK', 'Game.ini')}.`);
       }
-      if (plan.managed) await fs.chmod(gameIni, 0o444).catch(() => undefined);
+      // Clearing our pin must also release our read-only protection so the
+      // game can save its own language choice again.
+      if (plan.managed && locale !== undefined) await fs.chmod(gameIni, 0o444).catch(() => undefined);
     }
   }
 }
@@ -336,7 +340,9 @@ export async function prepareProtonRunner(
   compatibilityDataPath: string,
   steamRoot: string,
   gameWineCommand = winePath,
+  shaderCacheLimitGiB = DEFAULT_SHADER_CACHE_GIB,
 ): Promise<ProtonRunner | undefined> {
+  const cacheLimits = shaderCacheLimits(shaderCacheLimitGiB);
   const protonRoot = path.resolve(path.dirname(winePath), '..', '..');
   const proton = path.join(protonRoot, 'proton');
   const defaultPrefix = path.join(protonRoot, 'files', 'share', 'default_pfx');
@@ -432,6 +438,13 @@ export async function prepareProtonRunner(
   const wineDllPath = [path.join(files, 'lib', 'vkd3d'), path.join(files, 'lib', 'wine')].join(':');
   const executablePath = [path.join(files, 'bin'), process.env.PATH ?? ''].filter(Boolean).join(':');
   const eacRuntime = await installedEacRuntime(steamRoot);
+  // Keep the caches outside temporary launch views, separately for each prefix.
+  const shaderCaches = await prepareShaderCache(compatibilityDataPath);
+  const defaultEnvironment = (name: string, value: string) => [
+    `if [ "\${${name}+x}" != x ]; then`,
+    `  export ${name}=${shellQuote(value)}`,
+    'fi',
+  ];
   const runner = path.join(compatibilityDataPath, 'xodus-proton-wine');
   const temporary = `${runner}.tmp-${process.pid}`;
   const makeScript = (launchWine: string) => [
@@ -453,6 +466,18 @@ export async function prepareProtonRunner(
     `export PATH=${shellQuote(executablePath)}`,
     `export WINEDLLOVERRIDES='dxgi=n;d3d11=n;d3d10core=n;d3d9=n;d3d12=n;d3d12core=n${http2Runtime ? ';winhttp=b;libnghttp2=n' : ''}${dxvkRuntime ? ';d3d8=n' : ''}'`,
     "export WINE_LARGE_ADDRESS_AWARE='1'",
+    // Preserve each explicit setting, including disabled/empty values. Limits
+    // apply only when selecting our managed driver directory, not a custom one.
+    ...defaultEnvironment('VKD3D_SHADER_CACHE_PATH', shaderCaches.vkd3d),
+    'if [ "${__GL_SHADER_DISK_CACHE_PATH+x}" != x ]; then',
+    `  export __GL_SHADER_DISK_CACHE_PATH=${shellQuote(shaderCaches.nvidia)}`,
+    ...defaultEnvironment('__GL_SHADER_DISK_CACHE', '1'),
+    ...defaultEnvironment('__GL_SHADER_DISK_CACHE_SIZE', cacheLimits.bytes),
+    'fi',
+    'if [ "${MESA_SHADER_CACHE_DIR+x}" != x ]; then',
+    `  export MESA_SHADER_CACHE_DIR=${shellQuote(shaderCaches.mesa)}`,
+    ...defaultEnvironment('MESA_SHADER_CACHE_MAX_SIZE', cacheLimits.mesa),
+    'fi',
     // Use Steam's genuine compatibility bridge when installed. Never force a
     // particular game to load it or replace an explicit user configuration.
     ...(eacRuntime ? [

@@ -170,10 +170,12 @@ export interface GameOperation {
 }
 
 export interface Settings {
+  interfaceLanguage?: string;
   installRoot: string;
   market: string;
   parallelDownloads: number;
   downloadLimitMiB?: number;
+  shaderCacheLimitGiB?: number;
   winePath: string;
   externalXodusRoot: string;
   runtimeRoot: string;
@@ -217,6 +219,7 @@ export interface KeyringStatus {
 }
 
 export interface AppSnapshot {
+  social?: import('./game-invites.js').GameInviteState;
   backend: BackendStatus;
   runtime: RuntimeStatus;
   games: Game[];
@@ -247,6 +250,8 @@ export interface InstallChoice {
   supported: boolean;
   parentProductId?: string;
   mainPackageFamilyName?: string;
+  downloadBytes?: number;
+  installBytes?: number;
 }
 
 export interface InstallPlan {
@@ -255,6 +260,7 @@ export interface InstallPlan {
   market: string;
   status: 'ready' | 'choice' | 'unavailable';
   choices: InstallChoice[];
+  availableBytes?: number;
 }
 
 export interface GameContentItem {
@@ -343,6 +349,8 @@ export interface CatalogSearchResult {
 export type LibraryAccess = 'owned' | 'gamepass' | 'other';
 export interface AccountLibraryPage {
   kind: 'all' | LibraryAccess;
+  sort?: 'recent-gamepass';
+  recentProductIds?: string[];
   products: (CatalogProduct & { access: LibraryAccess })[];
   accessByProductId: Record<string, LibraryAccess>;
   unclassifiedEntitlements?: number;
@@ -353,6 +361,15 @@ export interface AccountLibraryPage {
 }
 
 export interface LauncherApi {
+  inviteXboxFriend(gameId:string,xuid:string):Promise<void>;
+  chooseGameInviteRecipient(id: string, xuid: string): Promise<void>;
+  cancelGameInvite(id: string): Promise<void>;
+  acceptGameInvite(id: string): Promise<void>;
+  onOpenFriends(callback: () => void): () => void;
+  getXboxFriends(): Promise<import('./social.js').XboxFriend[]>;
+  getXboxConversation(xuid: string): Promise<import('./social.js').XboxConversation>;
+  sendXboxMessage(xuid: string, text: string): Promise<import('./social.js').XboxMessageReceipt>;
+  closeXboxSocial(): Promise<void>;
   getSnapshot(): Promise<AppSnapshot>;
   refreshBackend(): Promise<BackendStatus>;
   checkBackendUpdate(): Promise<BackendStatus>;
@@ -384,9 +401,9 @@ export interface LauncherApi {
   logout(): Promise<void>;
   searchCatalog(query: string, cursor?: string): Promise<CatalogSearchResult>;
   getFeaturedCatalog(): Promise<CatalogSearchResult>;
-  getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean): Promise<AccountLibraryPage>;
+  getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean, sort?: AccountLibraryPage['sort']): Promise<AccountLibraryPage>;
   startInstall(request: InstallRequest): Promise<string>;
-  getInstallPlan(productId: string): Promise<InstallPlan>;
+  getInstallPlan(productId: string, destination?: string): Promise<InstallPlan>;
   getGameContent(id: string): Promise<GameContentPlan>;
   installGameContent(id: string, productId: string): Promise<string>;
   updateInstalledGame(id: string): Promise<string>;
