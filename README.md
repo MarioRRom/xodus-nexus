@@ -9,6 +9,8 @@ Your Microsoft Store PC games, on Linux.
 [![CI](https://github.com/domsvoboda/xodus-nexus/actions/workflows/ci.yml/badge.svg)](https://github.com/domsvoboda/xodus-nexus/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**[🌐 Help translate Xodus Nexus on Tolgee](https://app.tolgee.io/projects/36162)**
+
 </div>
 
 > [!CAUTION]
@@ -24,9 +26,20 @@ Browse the Store, install games you own or can access through a subscription,
 and play with one shared runtime. Xbox sign-in and cloud saves are available
 for supported games.
 
-![Xodus Nexus demo](docs/screenshots/demo.gif?v=c2c5cd4c)
+![Xodus Nexus demo](docs/screenshots/demo.gif?v=bb1bc859)
 
 *Preview with sample account data.*
+
+## Community translations
+
+Help make Nexus available in your language. Open our
+[public Tolgee project](https://app.tolgee.io/projects/36162), sign in and suggest
+translations for the launcher interface. No coding or GitHub access is needed.
+Maintainers review suggestions before including them in a release. Missing a
+language? Request it in a [GitHub issue](https://github.com/domsvoboda/xodus-nexus/issues).
+
+[Start translating →](https://app.tolgee.io/projects/36162/translations) ·
+[Translation guide](docs/TRANSLATING.md)
 
 ## Install
 
@@ -68,14 +81,6 @@ Flatpak version available through Discover. Other browsers are not supported.
 - **Settings → Shader cache** sets the per-game Mesa/NVIDIA driver cache limit, 4 GiB by default. Changes apply on the next game launch; explicit environment overrides take precedence.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
 
-## Xbox friends and chat (experimental)
-
-Open **Friends** in the bottom-right corner for your Xbox friends list, text conversations and game invitations. Chat requires a compatible Nexus backend and your account's communication permissions. The visible panel refreshes conversations automatically. If delivery cannot be confirmed, check the conversation before sending again.
-
-With a compatible launcher and runtime, supported games also publish their Xbox playing status after sign-in. The game is removed from that status when it closes; Xbox privacy settings still apply.
-
-Invitations require a compatible Nexus runtime and a running game. Use the game's **Invite friends** action to choose a friend, or select **Invite to game** when the game has published a joinable activity. Incoming invitations appear in Friends and can be accepted there. This does not add multiplayer support to games that cannot connect to their services.
-
 ## Wallet setup and unlocking
 
 - If the service is stopped, use **Start service**. Supported KDE wallets should also start automatically when Nexus opens in Game Mode.
@@ -100,16 +105,21 @@ Other license errors can have different causes.
 
 | Component | Role |
 | --- | --- |
-| Xodus Nexus | Store browsing, library, installation queue and launch controls. |
-| Nexus backend | Patched build of [Xodus](https://github.com/xodus-gaming/xodus) for account sign-in, license checks, package downloads and launch preparation. |
-| Nexus runtime | Shared [Wine](https://www.winehq.org/) / [Proton](https://github.com/ValveSoftware/Proton) runtime with [Xodus XGameRuntime](https://github.com/xodus-gaming/xgameruntime) and additional Nexus compatibility patches. |
+| Xodus Nexus launcher | The desktop interface for the Store, library, downloads, settings and launching games. |
+| Nexus backend | Our patched build of [Xodus](https://github.com/xodus-gaming/xodus), handling Microsoft account sign-in, genuine license checks, package downloads and launch preparation. |
+| [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime) | Our fork of Valve's Proton Experimental, assembling Wine, XGameRuntime, graphics translation and supporting libraries into one complete runtime. |
+| [Nexus Wine](https://github.com/domsvoboda/nexus-wine) | The matching Wine fork, providing Windows API compatibility and Nexus game fixes. |
+| [Nexus XGameRuntime](https://github.com/domsvoboda/nexus-xgameruntime) | Our fork of the upstream C++ XGameRuntime, providing game-facing account, cloud-save, package and Store/DLC interfaces. API coverage varies by game. |
 
-Every game uses the same launch path and shared runtime.
+The launcher asks the backend to prepare a licensed game, then starts it with
+the shared Nexus Runtime. Wine provides Windows compatibility; XGameRuntime
+connects supported Xbox and Microsoft Store game APIs to the Nexus backend.
+DXVK and VKD3D-Proton translate supported Direct3D graphics to Vulkan.
 
-Runtime updates are downloaded from [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
-in **Settings**. It is based on Valve's Proton Experimental with
-[Nexus Wine](https://github.com/domsvoboda/nexus-wine) and
-[Nexus XGameRuntime](https://github.com/domsvoboda/nexus-xgameruntime).
+Install or update the complete runtime through **Settings**. Its Wine and
+XGameRuntime components are built together at matching revisions, so there is
+no need to install the individual forks separately. All games use the same
+shared runtime; compatibility and online services still depend on the game.
 
 ## Compatible games
 
@@ -205,6 +215,3 @@ The Nexus runtime includes [FFmpeg](https://ffmpeg.org/) shared libraries under
 LGPL 2.1 or later; its corresponding pinned source and build recipe accompany
 each runtime release.
 [Contributing](CONTRIBUTING.md)
-
-Community translations: [contribute on Tolgee](https://app.tolgee.io/projects/36162)
-or read the [translation guide](docs/TRANSLATING.md).
