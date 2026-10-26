@@ -13,7 +13,7 @@ import { defaultLaunchTools, normalizeLaunchTools } from '../shared/launch-tools
 import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-cache';
 import type { GameLaunchTools } from '../shared/types';
 import { catalogInstallRequest, PackageInstallProvider, usePackageInstall } from './PackageInstall';
-import { defaultLibraryFilters, loadLibraryFilters, saveLibraryFilters, libraryProductMatchesPlayState, type LibraryFilters } from './library-preferences';
+import { defaultLibraryFilters, loadLibraryFilters, saveLibraryFilters, libraryProductMatchesPlayState, rankLibraryRows, type LibraryFilters } from './library-preferences';
 import { InstallQueueShortcut } from './InstallQueueShortcut';
 import { GamepadNavigation } from './GamepadNavigation';
 import { ConfirmationProvider, useConfirmation } from './Confirmation';
@@ -406,8 +406,9 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
   const [localFilters, setLocalFilters] = useState<LibraryFilters>(defaultLibraryFilters);
   const selectedFilters = filters ?? localFilters;
   const { kind, playState, query } = selectedFilters;
+  const sort = kind === 'gamepass' ? selectedFilters.sort : undefined;
   const updateFilters = (patch: Partial<LibraryFilters>) => (onFiltersChange ?? setLocalFilters)({ ...selectedFilters, ...patch });
-  const setKind = (kind: LibraryFilters['kind']) => updateFilters({ kind });
+  const setKind = (kind: LibraryFilters['kind']) => updateFilters({ kind, sort:kind === 'gamepass' ? sort : undefined });
   const setPlayState = (playState: LibraryFilters['playState']) => updateFilters({ playState });
   const setQuery = (query: string) => updateFilters({ query });
   const [result, setResult] = useState<AccountLibraryPage>();
@@ -420,7 +421,7 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
     const timer = window.setTimeout(() => setSearchTerm(query.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [query]);
-  const identity = `${data.auth.stored}:${data.auth.username}:${data.auth.running}:${data.settings.market}:${data.backend.binaryPath}:${kind}`;
+  const identity = `${data.auth.stored}:${data.auth.username}:${data.auth.running}:${data.settings.market}:${data.backend.binaryPath}:${kind}:${sort ?? 'default'}`;
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   const [loadedIdentity, setLoadedIdentity] = useState(identity);
@@ -430,7 +431,7 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
     setResult(undefined); setLoadedIdentity(identity); setError(undefined);
     if (!available) { setBusy(false); return; }
     setBusy(true);
-    window.launcher.getAccountLibrary(kind).then(value => { if (!cancelled) setResult(value); })
+    window.launcher.getAccountLibrary(kind,undefined,false,sort).then(value => { if (!cancelled) setResult(value); })
       .catch(error => { if (!cancelled) setError(errorMessage(error)); })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
@@ -448,17 +449,18 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
   const queued = new Set(data.downloads.filter(task => ['running', 'queued', 'paused'].includes(task.status)).map(task => task.productId.toUpperCase()));
   const products = (visible?.products ?? []).filter(product => !installed.has(product.productId) && !installed.has(product.installProductId ?? ''));
   const access = (game: Game) => game.storeId ? visible?.accessByProductId[game.storeId.toUpperCase()] : undefined;
-  const rows = [
+  const rows = rankLibraryRows([
     ...data.games.filter(game => playState !== 'installable' && (kind === 'all' || access(game) === kind)).sort((a, b) => a.title.localeCompare(b.title))
       .map(game => ({ id: game.id, title: game.title, game, product: undefined })),
     ...products.filter(product => libraryProductMatchesPlayState(product, playState)).map(product => ({ id: product.productId, title: product.title, product, game: undefined })),
-  ].filter(row => row.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  ].filter(row => row.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())),
+    sort ? visible?.recentProductIds : undefined, row => row.product?.productId ?? row.game?.storeId?.toUpperCase());
   async function load(refresh = false) {
     setBusy(true); setError(undefined);
     try {
-      const next = await window.launcher.getAccountLibrary(kind, refresh ? undefined : visible?.cursor, refresh);
+      const next = await window.launcher.getAccountLibrary(kind, refresh ? undefined : visible?.cursor, refresh, sort);
       if (currentIdentity.current !== identity) return;
-      if (!refresh && visible?.cursor && next.cursor === visible.cursor) throw Error('Library pagination did not advance. Refresh the library to try again.');
+      if (!refresh && visible?.cursor && next.cursor === visible.cursor) throw Error("Library pagination did not advance. Refresh the library to try again.");
       // This instance is remounted on identity changes, so pending callbacks
       // cannot publish another account's products into the active component.
       setResult(old => ({ ...next, products: refresh ? next.products : [...(old?.products ?? []), ...next.products.filter(p => !old?.products.some(old => old.productId === p.productId))] }));
@@ -477,22 +479,23 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
   }
   return <section className="account-games">
     <div className="library-filters" data-gamepad-filters>
-      <label>Access<select aria-label="Access" value={kind} onChange={event => setKind(event.target.value as AccountLibraryPage['kind'])}><option value="all">All games</option><option value="owned">Owned</option><option value="gamepass">In Game Pass</option><option value="other">Other access</option></select></label>
-      <label>Play state<select aria-label="Play state" value={playState} onChange={event => setPlayState(event.target.value as typeof playState)}><option value="all">All states</option><option value="installed">Installed</option><option value="installable">Ready to install</option></select></label>
-      <label className="library-filter-search">Search<input aria-label="Search library" placeholder="Search your games" value={query} onChange={event => setQuery(event.target.value)} /></label>
-      <button className="secondary library-refresh" aria-label="Refresh library" title="Refresh library" disabled={!available || busy} onClick={() => load(true)}>{busy ? <LoaderCircle className="spin" /> : <RefreshCw />}</button>
+      <label>{"Access"}<select aria-label={"Access"} value={kind} onChange={event => setKind(event.target.value as AccountLibraryPage['kind'])}><option value="all">{"All games"}</option><option value="owned">{"Owned"}</option><option value="gamepass">{"In Game Pass"}</option><option value="other">{"Other access"}</option></select></label>
+      <label>{"Play state"}<select aria-label={"Play state"} value={playState} onChange={event => setPlayState(event.target.value as typeof playState)}><option value="all">{"All states"}</option><option value="installed">{"Installed"}</option><option value="installable">{"Ready to install"}</option></select></label>
+      {kind === 'gamepass' ? <label>{"Sort"}<select aria-label={"Library order"} value={sort ?? 'default'} onChange={event => updateFilters({sort:event.target.value === 'recent-gamepass' ? 'recent-gamepass' : undefined})}><option value="default">{"Default order"}</option><option value="recent-gamepass">{"Recently added to Game Pass"}</option></select></label> : null}
+      <label className="library-filter-search">{"Search"}<input aria-label={"Search library"} placeholder={"Search your games"} value={query} onChange={event => setQuery(event.target.value)} /></label>
+      <button className="secondary library-refresh" aria-label={"Refresh library"} title={"Refresh library"} disabled={!available || busy} onClick={() => load(true)}>{busy ? <LoaderCircle className="spin" /> : <RefreshCw />}</button>
     </div>
     <div className="account-games-results">
-    {!available ? <p>{data.auth.stored !== true ? 'Sign in to load your account games. Installed games remain available.' : !data.backend.capabilities.library ? 'Update the Xodus backend to load account licenses.' : 'Wait for sign-in to finish.'}</p> : null}
+    {!available ? <p>{data.auth.stored !== true ? "Sign in to load your account games. Installed games remain available." : !data.backend.capabilities.library ? "Update the Xodus backend to load account licenses." : "Wait for sign-in to finish."}</p> : null}
       {error ? <div className="alert amber"><CircleAlert /><span>{error}</span><BackendLogButton toast={toast} /></div> : null}
-      {visible?.skippedEntitlements || visible?.excludedEntitlements ? <div className="alert amber"><CircleAlert /><span>Some license records could not be verified and were omitted. This list may be incomplete.</span><BackendLogButton toast={toast} /></div> : null}
+      {visible?.skippedEntitlements || visible?.excludedEntitlements ? <div className="alert amber"><CircleAlert /><span>{"Some license records could not be verified and were omitted. This list may be incomplete."}</span><BackendLogButton toast={toast} /></div> : null}
       <div className="catalog-grid" data-gamepad-grid>{rows.map(row => {
         if (row.game) {
           const game = row.game;
           const license = access(game);
           return <div className={`library-card-wrap catalog-card ${selectedId === game.id ? 'selected' : ''}`} data-gamepad-card key={game.id} onContextMenu={event => { event.preventDefault(); menu?.(game, event.clientX, event.clientY); }}>
-            <button className="library-card catalog-card-main" data-gamepad-auto-select="focus" data-gamepad-detail-target={game.id} onFocus={() => select?.(game, false)} onClick={() => select?.(game, true)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.left + 16, rect.top + 16); } }}><Cover game={game} /><div><GameTitle title={game.title} /><small>{game.publisher ?? 'Local installation'}</small><span>{license === 'owned' ? 'Owned' : license === 'gamepass' ? 'Game Pass' : license === 'other' ? 'Other access' : 'Local installation'}</span></div></button>
-            <span className="catalog-card-status" title={game.installMessage}>{game.installState === 'incomplete' ? <><CircleAlert />Incomplete</> : game.installState === 'imported' ? <><FolderOpen />Imported</> : <><Check />{data.gameUpdates?.[game.id]?.available ? 'Update available' : 'Installed'}</>}</span>
+            <button className="library-card catalog-card-main" data-gamepad-auto-select="focus" data-gamepad-detail-target={game.id} onFocus={() => select?.(game, false)} onClick={() => select?.(game, true)} onKeyDown={event => { if (event.key === 'F10' && event.shiftKey) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.left + 16, rect.top + 16); } }}><Cover game={game} /><div><GameTitle title={game.title} /><small>{game.publisher ?? "Local installation"}</small><span>{license === 'owned' ? "Owned" : license === 'gamepass' ? "Game Pass" : license === 'other' ? "Other access" : "Local installation"}</span></div></button>
+            <span className="catalog-card-status" title={game.installMessage}>{game.installState === 'incomplete' ? <><CircleAlert />{"Incomplete"}</> : game.installState === 'imported' ? <><FolderOpen />{"Imported"}</> : <><Check />{data.gameUpdates?.[game.id]?.available ? "Update available" : "Installed"}</>}</span>
             <button className="library-card-menu-button" data-game-menu-trigger data-gamepad-skip aria-label={`Options for ${game.title}`} aria-haspopup="menu" title={`Options for ${game.title}`} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); menu?.(game, rect.right, rect.bottom); }}><MoreHorizontal /></button>
           </div>;
         }
@@ -501,9 +504,10 @@ export function AccountGames({ data, toast, selectedId, select, menu, filters, o
         const downloading = queued.has(product.productId) || queued.has(product.installProductId ?? '');
         return <LibraryProductCard key={product.productId} product={product} present={present} downloading={downloading} installing={installing} canInstall={data.backend.capabilities.streaming} install={install} />;
       })}</div>
-      {!busy && !searching && !error && !rows.length ? <p>{visible?.cursor && playState !== 'installed' ? 'No games match these filters in the loaded results. Load more to continue.' : 'No games match these filters.'}</p> : null}
+      {!busy && !searching && !error && !rows.length ? <p>{visible?.cursor && playState !== 'installed' ? "No games match these filters in the loaded results. Load more to continue." : "No games match these filters."}</p> : null}
       <div data-gamepad-library-footer><LibraryPagination loading={busy} hasMore={Boolean(visible?.cursor)} searching={searching} load={() => { void load(); }} />
-      <p className="account-library-note">Licensed games are listed regardless of package support. Unsupported games cannot be installed. Add-ons are excluded. Installation checks your license again.</p></div>
+      <p className="account-library-note">{"Licensed games are listed regardless of package support. Unsupported games cannot be installed. Add-ons are excluded. Installation checks your license again."}</p></div>
+      {sort ? <p className="account-library-note">{"Microsoft's PC Game Pass recently added collection appears first. Other licensed games follow in default order."}</p> : null}
     </div>
   </section>;
 }

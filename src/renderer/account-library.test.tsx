@@ -6,6 +6,16 @@ import { defaultLaunchTools } from '../shared/launch-tools';
 import { demoSnapshot } from '../shared/demo-data';
 import type { AccountLibraryPage } from '../shared/types';
 
+it('offers the explicit recent PC Game Pass order only within the Game Pass access filter',()=>{
+ const data=demoSnapshot();
+ const filters:LibraryFilters={kind:'gamepass',playState:'all',query:'',sort:'recent-gamepass'};
+ const html=renderToStaticMarkup(<AccountGames data={data} toast={()=>{}} filters={filters} />);
+ expect(html).toContain('aria-label="Library order"');expect(html).toContain('Recently added to Game Pass');
+ expect(html).toContain('PC Game Pass recently added collection');
+ for(const kind of ['all','owned','other'] as const)
+  expect(renderToStaticMarkup(<AccountGames data={data} toast={()=>{}} filters={{...filters,kind}} />)).not.toContain('aria-label="Library order"');
+});
+
 it('offers a configurable four-GiB driver shader cache limit with a separate save action',()=>{
   const data=demoSnapshot();let html=renderToStaticMarkup(<SettingsPage data={data} toast={()=>{}} />);
   expect(html).toContain('Driver cache limit (GiB)');expect(html).toContain('Default: 4 GiB');expect(html).toContain('Save cache limit');expect(html).toContain('next game launch');

@@ -103,10 +103,10 @@ export class AccountLibrary {
   private identity?: { account: string; binary: string; market: string };
   private generation = 0;
   private controller?: AbortController;
-  private cached?: { checkedAt: string; entries: Map<string, Entitlement>; skipped: number; unclassified: number; excluded: number; until: number; key: string };
+  private cached?: { checkedAt: string; entries: Map<string, Entitlement>; skipped: number; unclassified: number; excluded: number; until: number; key: string; recent?: Promise<string[]> };
   private job?: Promise<void>;
   private pages = new Map<string, AccountLibraryPage>();
-  constructor(private catalog: Catalog, private reader: Reader = read) {}
+  constructor(private catalog: Catalog, private reader: Reader = read, private recent?: (market: string) => Promise<string[]>) {}
   reset(): void {
     this.generation++; this.controller?.abort(); this.controller = undefined;
     this.cached = undefined; this.job = undefined; this.pages.clear();
@@ -173,8 +173,9 @@ export class AccountLibrary {
     }
     return { checkedAt: cached.checkedAt, accessByProductId };
   }
-  async get(kind: Kind, cursor?: string, refresh = false): Promise<AccountLibraryPage> {
+  async get(kind: Kind, cursor?: string, refresh = false, sort?: AccountLibraryPage['sort']): Promise<AccountLibraryPage> {
     if (kind !== 'all' && kind !== 'owned' && kind !== 'gamepass' && kind !== 'other') throw Error('Invalid library filter.');
+    if (sort !== undefined && (sort !== 'recent-gamepass' || kind !== 'gamepass')) throw Error('Invalid library order.');
     if (typeof refresh !== 'boolean' || (cursor !== undefined && typeof cursor !== 'string')) throw Error('Invalid library request.');
     const cached = await this.load(cursor, refresh);
     if (cached !== this.cached || !this.identity) throw Error('Account library changed. Refresh this page.');
@@ -182,6 +183,20 @@ export class AccountLibrary {
     const identity = this.identity!;
     const generation = this.generation;
     const current = () => { if (generation !== this.generation) throw Error('Account library changed. Refresh this page.'); };
+    let recent: string[] | undefined;
+    if (sort) {
+      // Freeze the public order for this licensed snapshot so a live feed change
+      // cannot duplicate or skip games between pages. It never grants access.
+      if (!this.recent) throw Error('PC Game Pass ordering is unavailable. Choose Default order.');
+      cached.recent ??= Promise.resolve().then(() => this.recent!(identity.market)).then(ids => {
+        if (!Array.isArray(ids) || ids.length > 1000 || ids.some(value => !id(value)) || new Set(ids).size !== ids.length)
+          throw Error('Invalid PC Game Pass order.');
+        return [...ids];
+      }).catch(() => { cached.recent = undefined; throw Error('The PC Game Pass recently added list could not be loaded. Try again or choose Default order.'); });
+      recent = await cached.recent;
+      current();
+      if (this.cached !== cached) throw Error('Library results changed. Refresh this page.');
+    }
     const accessByProductId: AccountLibraryPage['accessByProductId'] = {};
     for (const product of cached.entries.keys()) {
       const access = entitlementKind(product, cached.entries);
@@ -190,28 +205,32 @@ export class AccountLibrary {
     // Stable offsets within one snapshot even when a license expires mid-page.
     const checked = Date.parse(cached.checkedAt);
     const snapshotAccess = new Map([...cached.entries.keys()].map(product => [product, entitlementKind(product, cached.entries, checked)]));
+    const recentProductIds = recent?.filter(product => snapshotAccess.get(product) === 'gamepass');
+    const rank = new Map(recentProductIds?.map((product,index) => [product,index]));
     const ids = [...cached.entries.keys()].filter(product => snapshotAccess.get(product) && (kind === 'all' || snapshotAccess.get(product) === kind))
-      .sort((a,b) => Number(snapshotAccess.get(b) === 'owned') - Number(snapshotAccess.get(a) === 'owned') || a.localeCompare(b));
+      .sort((a,b) => (rank.get(a) ?? 1000) - (rank.get(b) ?? 1000) || Number(snapshotAccess.get(b) === 'owned') - Number(snapshotAccess.get(a) === 'owned') || a.localeCompare(b));
     let offset = 0;
     if (cursor) {
-      const match = cursor.match(/^([a-f0-9-]{36}):(all|owned|gamepass|other):(\d{1,5})$/);
-      if (!match || match[1] !== cached.key || match[2] !== kind) throw Error('Invalid or expired library page.');
-      offset = Number(match[3]);
+      const match = cursor.match(/^([a-f0-9-]{36}):(all|owned|gamepass|other)(?::(recent-gamepass))?:(\d{1,5})$/);
+      if (!match || match[1] !== cached.key || match[2] !== kind || match[3] !== sort) throw Error('Invalid or expired library page.');
+      offset = Number(match[4]);
       if (offset % 60 || offset > ids.length) throw Error('Invalid library page offset.');
     }
-    const key = `${kind}:${offset}`;
+    const key = `${kind}:${sort ?? 'default'}:${offset}`;
     const existing = this.pages.get(key);
-    if (existing) return structuredClone({ ...existing, accessByProductId, products: existing.products.filter(p => accessByProductId[p.productId]) });
+    if (existing) return structuredClone({ ...existing, accessByProductId,
+      ...(sort ? {recentProductIds:existing.recentProductIds?.filter(id => accessByProductId[id] === 'gamepass')} : {}),
+      products: existing.products.filter(p => accessByProductId[p.productId]) });
     const products = await this.catalog(ids.slice(offset, offset + 60), identity.market);
     current();
     if (this.cached !== cached) throw Error('Library results changed. Refresh this page.');
     const allowed = new Set(ids.slice(offset, offset + 60));
-    const page: AccountLibraryPage = { kind, checkedAt: cached.checkedAt, accessByProductId, skippedEntitlements: cached.skipped,
+    const page: AccountLibraryPage = { kind, ...(sort ? {sort,recentProductIds} : {}), checkedAt: cached.checkedAt, accessByProductId, skippedEntitlements: cached.skipped,
       unclassifiedEntitlements: cached.unclassified, excludedEntitlements: cached.excluded,
       products: products.filter(product => allowed.has(product.productId) && accessByProductId[product.productId])
         .map(product => ({ ...product, access: accessByProductId[product.productId] }))
-        .sort((a, b) => a.title.localeCompare(b.title)),
-      cursor: offset + 60 < ids.length ? `${cached.key}:${kind}:${offset + 60}` : undefined };
+        .sort((a, b) => (sort ? (rank.get(a.productId) ?? 1000) - (rank.get(b.productId) ?? 1000) : 0) || a.title.localeCompare(b.title)),
+      cursor: offset + 60 < ids.length ? `${cached.key}:${kind}${sort ? ':' + sort : ''}:${offset + 60}` : undefined };
     this.pages.set(key, page);
     return structuredClone(page);
   }

@@ -11,6 +11,63 @@ const row=(productId=A, extra={})=>({productId,status:'Active',isTrial:false,sha
 const output=(entries=[row()],account='one@example.test',market='US')=>JSON.stringify({schema:1,account,market,checkedAt:new Date().toISOString(),entitlements:entries});
 const product=(productId:string):CatalogProduct=>({productId,title:productId,description:'',categories:[],installability:'supported',supportNote:''});
 
+it('ranks genuine Game Pass licenses before paging and never imports unlicensed or owned collection entries (#202)',async()=>{
+ const ids=Array.from({length:65},(_,i)=>`9${String(i).padStart(11,'0')}`),owned='9OWNEDOWNED1',foreign='9FOREIGN0001';
+ const reader=vi.fn(async()=>output([...ids.map(id=>row(id,{satisfiedByProductId:'CFQ7TTC0KGQ8'})),row(owned)]));
+ const recent=vi.fn(async()=>[foreign,ids[64],owned,ids[63]]);
+ const catalog=vi.fn(async(ids:string[])=>ids.slice().reverse().map(product));
+ const library=new AccountLibrary(catalog,reader,recent);library.select('one@example.test','/backend','US');
+ const first=await library.get('gamepass',undefined,false,'recent-gamepass');
+ expect(first.products.slice(0,2).map(p=>p.productId)).toEqual([ids[64],ids[63]]);
+ expect(first.recentProductIds).toEqual([ids[64],ids[63]]);expect(first.products).toHaveLength(60);
+ expect(first.accessByProductId[foreign]).toBeUndefined();expect(first.products.some(p=>p.productId===owned)).toBe(false);
+ const next=await library.get('gamepass',first.cursor,false,'recent-gamepass');
+ expect([...first.products,...next.products].map(p=>p.productId).sort()).toEqual(ids);
+ expect(recent).toHaveBeenCalledOnce();expect(reader).toHaveBeenCalledOnce();
+ await expect(library.get('gamepass',first.cursor)).rejects.toThrow('Invalid');
+ const normal=await library.get('gamepass');await expect(library.get('gamepass',normal.cursor,false,'recent-gamepass')).rejects.toThrow('Invalid');
+});
+
+it('keeps default requests independent of the public feed and rejects unsupported order before account reads',async()=>{
+ const reader=vi.fn(async()=>output([row(A,{satisfiedByProductId:'CFQ7TTC0KGQ8'})]));
+ const recent=vi.fn(async()=>[A]);const library=new AccountLibrary(async ids=>ids.map(product),reader,recent);
+ library.select('one@example.test','/backend','US');
+ await expect(library.get('owned',undefined,false,'recent-gamepass')).rejects.toThrow('Invalid library order');
+ await expect(library.get('gamepass',undefined,false,'foreign' as never)).rejects.toThrow('Invalid library order');
+ expect(reader).not.toHaveBeenCalled();expect(recent).not.toHaveBeenCalled();
+ for(const kind of ['all','owned','gamepass','other'] as const)await library.get(kind);
+ expect(recent).not.toHaveBeenCalled();expect(reader).toHaveBeenCalledOnce();
+});
+it('freezes public rank per snapshot, separates page caches and refreshes without changing access',async()=>{
+ let ranking=[B,A];const recent=vi.fn(async()=>ranking);
+ const library=new AccountLibrary(async ids=>ids.map(product),async()=>output([row(A,{satisfiedByProductId:'CFQ7TTC0KGQ8'}),row(B,{satisfiedByProductId:'CFQ7TTC0KGQ8'})]),recent);
+ library.select('one@example.test','/backend','US');
+ expect((await library.get('gamepass')).products.map(p=>p.productId)).toEqual([A,B]);
+ const ranked=await library.get('gamepass',undefined,false,'recent-gamepass');expect(ranked.products.map(p=>p.productId)).toEqual([B,A]);
+ ranked.recentProductIds!.reverse();ranking=[A,B];
+ expect((await library.get('gamepass',undefined,false,'recent-gamepass')).products.map(p=>p.productId)).toEqual([B,A]);
+ expect((await library.get('gamepass')).products.map(p=>p.productId)).toEqual([A,B]);
+ expect((await library.get('gamepass',undefined,true,'recent-gamepass')).products.map(p=>p.productId)).toEqual([A,B]);
+ expect(recent).toHaveBeenCalledTimes(2);expect((await library.access()).accessByProductId).toEqual({[A]:'gamepass',[B]:'gamepass'});
+});
+it('rejects late ranks after account changes and does not cache malformed public feeds',async()=>{
+ let finish!:(ids:string[])=>void;
+ const recent=vi.fn(()=>new Promise<string[]>(resolve=>{finish=resolve;}));
+ const library=new AccountLibrary(async ids=>ids.map(product),async()=>output([row(A,{satisfiedByProductId:'CFQ7TTC0KGQ8'})]),recent);
+ library.select('one@example.test','/backend','US');const job=library.get('gamepass',undefined,false,'recent-gamepass');
+ const rejected=expect(job).rejects.toThrow('changed');await vi.waitFor(()=>expect(recent).toHaveBeenCalledOnce());
+ library.select('other@example.test','/backend','US');finish([A]);await rejected;
+ expect(library.peekAccess()).toEqual({});
+ for(const value of [[A,A],['foreign'],Array(1001).fill(A),null]){
+  let fail=true;const feed=vi.fn(async()=>{if(fail)return value as string[];return [A];});
+  const separate=new AccountLibrary(async ids=>ids.map(product),async()=>output([row(A,{satisfiedByProductId:'CFQ7TTC0KGQ8'})]),feed);
+  separate.select('one@example.test','/backend','US');
+  await expect(separate.get('gamepass',undefined,false,'recent-gamepass')).rejects.toThrow('recently added list');
+  fail=false;expect((await separate.get('gamepass',undefined,false,'recent-gamepass')).products[0].productId).toBe(A);
+  expect(feed).toHaveBeenCalledTimes(2);
+ }
+});
+
 it('shows explicit disc-to-digital access in All and Owned without an unknown-source warning', async () => {
   const reader = vi.fn(async () => output([row(A, { special: true, isPositron: true }), row(B)]));
   const library = new AccountLibrary(async ids => ids.map(product), reader);

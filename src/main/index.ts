@@ -45,6 +45,7 @@ import { loadShortcutIcon } from './shortcut-icon.js';
 import { AccountProfile } from './account-profile.js';
 import { AccountRefresh, readAccount } from './account-refresh.js';
 import { AccountLibrary } from './account-library.js';
+import { RecentPcGamePass } from './gamepass-recent.js';
 import { GameActivities, installedTitleId } from './game-activity.js';
 import { GameAchievementsReader } from './game-achievements.js';
 import { GameContent, type ContentPackage } from './game-content.js';
@@ -112,7 +113,8 @@ let initialWalletAttempted = false;
 const catalog = new CatalogService();
 const gameActivities = new GameActivities();
 const gameAchievements = new GameAchievementsReader();
-const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market));
+const recentPcGamePass = new RecentPcGamePass();
+const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market), undefined, market => recentPcGamePass.get(market));
 const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
@@ -1365,10 +1367,10 @@ function registerIpc(): void {
   ipcMain.handle('catalog-search', (_event, query: string, cursor?: string) => {
     return catalog.search(query, catalogMarket(), cursor);
   });
-  ipcMain.handle('account-library', (_event, kind: 'all' | 'owned' | 'gamepass', cursor?: string, refresh = false) => {
+  ipcMain.handle('account-library', (_event, kind: 'all' | 'owned' | 'gamepass' | 'other', cursor?: string, refresh = false, sort?: 'recent-gamepass') => {
     if (authState.running || authState.stored !== true) throw Error('Finish signing in before loading account games.');
     accountLibrary.select(authState.username, backend.current.capabilities.library ? backend.current.binaryPath : undefined, currentMarket());
-    return accountLibrary.get(kind, cursor, refresh);
+    return accountLibrary.get(kind, cursor, refresh, sort);
   });
   ipcMain.handle('read-backend-diagnostic-log', () => backendDiagnostics.read());
   ipcMain.handle('create-diagnostic-report', async (_event, gameId?: string) => {

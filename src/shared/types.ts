@@ -355,6 +355,8 @@ export interface AccountLibraryPage {
   cursor?: string;
   checkedAt: string;
   skippedEntitlements?: number;
+  sort?: 'recent-gamepass';
+  recentProductIds?: string[];
 }
 
 export interface LauncherApi {
@@ -398,7 +400,7 @@ export interface LauncherApi {
   logout(): Promise<void>;
   searchCatalog(query: string, cursor?: string): Promise<CatalogSearchResult>;
   getFeaturedCatalog(): Promise<CatalogSearchResult>;
-  getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean): Promise<AccountLibraryPage>;
+  getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean, sort?: AccountLibraryPage['sort']): Promise<AccountLibraryPage>;
   startInstall(request: InstallRequest): Promise<string>;
   getInstallPlan(productId: string, destination?: string): Promise<InstallPlan>;
   getGameContent(id: string): Promise<GameContentPlan>;

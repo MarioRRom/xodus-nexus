@@ -51,6 +51,7 @@ Flatpak version available through Discover. Other browsers are not supported.
 ## Use
 
 - **My Library** combines owned, Game Pass and installed games, with Access, Play state and title filters.
+- In **My Library → In Game Pass**, choose **Recently added to Game Pass** to show games in Microsoft's recent PC collection first.
 - Open a game for its description, categories, screenshot gallery and available Xbox achievements, time played and last activity. Xbox data depends on the account and game.
 - **Store** lets you browse and install supported PC games.
 - New game installations show the estimated download size and free space on the destination drive. The downloader checks exact space requirements.
