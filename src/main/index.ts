@@ -1619,10 +1619,11 @@ function registerIpc(): void {
     if (typeof patch.market === 'string' && /^[A-Za-z-]{2,20}$/.test(patch.market)) allowed.market = patch.market;
     if (typeof patch.parallelDownloads === 'number') allowed.parallelDownloads = Math.max(1, Math.min(16, Math.round(patch.parallelDownloads)));
     if (typeof patch.winePath === 'string') allowed.winePath = patch.winePath;
-    if (typeof patch.externalXodusRoot === 'string') allowed.externalXodusRoot = path.resolve(patch.externalXodusRoot);
+    if (typeof patch.externalXodusRoot === 'string') allowed.externalXodusRoot = patch.externalXodusRoot.trim() ? path.resolve(patch.externalXodusRoot) : '';
     if (typeof patch.runtimeRoot === 'string') allowed.runtimeRoot = path.resolve(patch.runtimeRoot);
     if (typeof patch.verboseLogs === 'boolean') allowed.verboseLogs = patch.verboseLogs;
     if (typeof patch.firstRunCompleted === 'boolean') allowed.firstRunCompleted = patch.firstRunCompleted;
+    const previous = store.settings;
     const settings = await store.setSettings(allowed);
     if (patch.downloadLimitMiB !== undefined) {
       try { await downloadLimitControls.apply(settings.downloadLimitMiB ?? 0); }
@@ -1631,6 +1632,10 @@ function registerIpc(): void {
     // A bandwidth-only change must not restart authentication or refresh devices.
     if (isBandwidthOnlyPatch(patch)) { emitSnapshot(); return settings; }
     if (isShaderCacheOnlyPatch(patch)) { emitSnapshot(); return settings; }
+    // Cosmetic/storage preferences do not change the selected components or
+    // account scope, including a full unchanged Settings form saved by the UI.
+    if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const)
+      .every(key => settings[key] === previous[key])) { emitSnapshot(); return settings; }
     backend.setExternalRoot(settings.externalXodusRoot);
     runtime.setRoot(settings.runtimeRoot);
     await backend.refresh();

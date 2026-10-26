@@ -31,6 +31,7 @@ const h = vi.hoisted(() => ({
   libraryReads: 0,
   launchEnvironments: [] as NodeJS.ProcessEnv[],
   backendRefreshes: 0, runtimeRefreshes: 0,
+  accountRequests: 0,
   prefixLocales: [] as (string | undefined)[],
   planOverrides: new Map<string, any>(),
   libraryRows: [] as any[],
@@ -83,12 +84,12 @@ vi.mock('./process.js', () => ({
       child: { kill: vi.fn(), stderr: { on() {}, removeListener() {} } },
       result: Promise.resolve({code:0,output:JSON.stringify({schema:1,account:'sample@example.test',market:'US',checkedAt:new Date().toISOString(),entitlements:h.libraryRows})}),
     }; }
-    if (args[0] === 'account') return {
+    if (args[0] === 'account') { h.accountRequests++;return {
       child: { kill: vi.fn(() => true) },
       result: h.holdAccountReads
         ? new Promise<{ code: number; output: string }>(resolve => { h.accountReads.push(resolve); })
         : Promise.resolve({ code: 0, output: JSON.stringify({ stored: true, username: 'sample@example.test' }) }),
-    };
+    }; }
     let resolve!: (result: { code: number; output: string }) => void, sequence = 0;
     const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
     const progress = (paused = false, phase = 'downloading') => options.onLine('NEXUS_PROGRESS ' + JSON.stringify({ schema: 1, event: 'progress', sequence: sequence++, phase,
@@ -109,6 +110,18 @@ const ipc = (name: string, ...args: any[]) => h.handlers.get(name)!(undefined, .
 const snapshot = () => ipc('get-snapshot');
 const install = (letter: string, destination = path.join(h.root, `download-${letter}`)) => ipc('start-install', { productId: `9${letter.repeat(11)}`, title: `Sample ${letter}`, destination });
 
+
+
+it('adds fresh advisory target storage to public package preflight without creating a folder or starting a transfer (#247)', async () => {
+  const destination=path.join(h.root,'storage-preview','game'),before=h.downloads.length;
+  const plan=await ipc('install-plan','9AAAAAAAAAAA',destination);
+  expect(plan.availableBytes).toBeTypeOf('number');expect(plan.choices[0].supported).toBe(true);
+  expect(await fs.access(path.dirname(destination)).then(()=>true,()=>false)).toBe(false);
+  expect(h.downloads).toHaveLength(before);
+  await expect(ipc('install-plan','9AAAAAAAAAAA','relative')).rejects.toThrow('absolute path');
+  expect((await ipc('install-plan','9AAAAAAAAAAA')).availableBytes).toBeUndefined();
+});
+
 it('saves shader cache limits through real IPC without refreshing components or changing installation state',async()=>{
   const refreshes=[h.backendRefreshes,h.runtimeRefreshes],downloads=snapshot().downloads,library=snapshot().games;
   await ipc('update-settings',{shaderCacheLimitGiB:8.5});expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);
@@ -116,6 +129,34 @@ it('saves shader cache limits through real IPC without refreshing components or 
   expect(snapshot().downloads).toEqual(downloads);expect(snapshot().games).toEqual(library);
   for(const value of [0,-1,'bad',2048])await expect(ipc('update-settings',{shaderCacheLimitGiB:value})).rejects.toThrow('Shader cache limit');
   expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+});
+
+it('saves ordinary launcher preferences without re-probing components or reading the account', async () => {
+  const before=snapshot(),refreshes=[h.backendRefreshes,h.runtimeRefreshes],accounts=h.accountRequests;
+  const settings={...before.settings,installRoot:path.join(h.root,'future-games'),parallelDownloads:6,verboseLogs:!before.settings.verboseLogs};
+  await ipc('update-settings',settings);
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(h.accountRequests).toBe(accounts);
+  expect(snapshot().settings).toMatchObject({installRoot:settings.installRoot,parallelDownloads:6,verboseLogs:settings.verboseLogs});
+  expect(snapshot().settings.externalXodusRoot).toBe(before.settings.externalXodusRoot);
+  expect(snapshot().games).toEqual(before.games);expect(snapshot().downloads).toEqual(before.downloads);
+  expect(await fs.access(settings.installRoot).then(()=>true,()=>false)).toBe(false);
+  await ipc('update-settings',before.settings);
+  await ipc('update-settings',{externalXodusRoot:'   '});
+  expect(snapshot().settings.externalXodusRoot).toBe('');
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(h.accountRequests).toBe(accounts);
+});
+
+it.each(['market','winePath','externalXodusRoot','runtimeRoot'] as const)
+('still revalidates components and account scope after a real %s selection change',async key=>{
+  const previous=snapshot().settings[key],counts=[h.backendRefreshes,h.runtimeRefreshes],accounts=h.accountRequests;
+  const selected=key==='market'?'CZ':path.join(h.root,'selected-'+key);
+  try{
+    await ipc('update-settings',{[key]:selected});
+    expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(counts.map(n=>n+1));
+    expect(h.accountRequests).toBe(accounts+1);expect(snapshot().settings[key]).toBe(selected);
+  }finally{await ipc('update-settings',{[key]:previous});}
 });
 
 beforeAll(async () => {
@@ -483,14 +524,4 @@ it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/down
   expect(h.downloads).toHaveLength(4);
   expect(h.notifications).toHaveLength(1); // no completion toast for cancelled/stopped jobs
   expect(h.releaseDisplay).toHaveBeenCalledWith(7);
-});
-
-it('adds fresh advisory target storage to public package preflight without creating a folder or starting a transfer (#247)', async () => {
-  const destination=path.join(h.root,'storage-preview','game'),before=h.downloads.length;
-  const plan=await ipc('install-plan','9AAAAAAAAAAA',destination);
-  expect(plan.availableBytes).toBeTypeOf('number');expect(plan.choices[0].supported).toBe(true);
-  expect(await fs.access(path.dirname(destination)).then(()=>true,()=>false)).toBe(false);
-  expect(h.downloads).toHaveLength(before);
-  await expect(ipc('install-plan','9AAAAAAAAAAA','relative')).rejects.toThrow('absolute path');
-  expect((await ipc('install-plan','9AAAAAAAAAAA')).availableBytes).toBeUndefined();
 });
