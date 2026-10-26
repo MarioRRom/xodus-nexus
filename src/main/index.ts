@@ -8,8 +8,11 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AppSnapshot, AuthStatus, DownloadTask, Game, GameLaunchOptions, GameOperation, GameUpdate, InstallRequest, Settings } from '../shared/types.js';
 import { downloadFailure, safeProductId } from '../shared/utils.js';
 import { contentLicenseFailure } from '../shared/content-license.js';
+import { interfaceLanguagePreference } from '../shared/interface-language.js';
+import { nativeTranslator } from './interface-language.js';
 import { downloadLimitArgs, downloadLimitKiB } from '../shared/download-bandwidth.js';
 import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-bandwidth.js';
+import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cache.js';
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
 import { backendLock } from './backend-package.js';
 import { BackendManager } from './backend.js';
@@ -18,7 +21,7 @@ import { inspectGameDirectory, StateStore } from './store.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { CatalogService } from './catalog.js';
-import { cloudSaveRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
+import { cloudSaveRuntime, gameInviteRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
 import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION, versionAtLeast } from './vc-runtime.js';
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
@@ -31,7 +34,7 @@ import { prepareGameWrapper, type GameWrapper } from './game-wrapper.js';
 import { normalizeLaunchTools } from '../shared/launch-tools.js';
 import { LauncherUpdater } from './launcher-update.js';
 import { copyDiagnosticFile, diagnosticLogFile, readDiagnosticTail } from './diagnostic-log.js';
-import { BackendDiagnostics, setBackendDiagnostics } from './backend-diagnostics.js';
+import { BackendDiagnostics, backendDiagnostic, setBackendDiagnostics } from './backend-diagnostics.js';
 import { createDiagnosticReport, reportSystemInfo, saveDiagnosticReport, validateReportContent } from './diagnostic-report.js';
 import { queryGameUpdate } from './game-updates.js';
 import { DownloadProgress, PROGRESS_PREFIX } from './download-progress.js';
@@ -44,6 +47,7 @@ import { loadShortcutIcon } from './shortcut-icon.js';
 import { AccountProfile } from './account-profile.js';
 import { AccountRefresh, readAccount } from './account-refresh.js';
 import { AccountLibrary } from './account-library.js';
+import { RecentPcGamePass } from './gamepass-recent.js';
 import { GameActivities, installedTitleId } from './game-activity.js';
 import { GameAchievementsReader } from './game-achievements.js';
 import { GameContent, type ContentPackage } from './game-content.js';
@@ -52,6 +56,7 @@ import { authViewFactory } from './auth-window.js';
 import { browserAuthViewFactory } from './auth-browser.js';
 import { fallbackAuthViewFactory } from './auth-fallback.js';
 import { contentParentForChoice, InstallPlans, installSelection, readInstallPlan } from './install-plan.js';
+import { availableInstallBytes } from './install-storage.js';
 import { adoptLauncherFonts } from './launcher-fonts.js';
 import { externalLauncherEnvironment } from './launcher-environment.js';
 import { openDesktopTarget } from './desktop-open.js';
@@ -60,20 +65,30 @@ import { gameSteamPortrait, nexusSteamArtwork } from './steam-artwork.js';
 import { addLiveSteamShortcut } from './steam-live.js';
 import { DownloadCompletionNotifications } from './download-notifications.js';
 import { KeyringSupport } from './keyring.js';
+import { XboxSocialSessions } from './xbox-social.js';
+import { GameInviteBridge, combinedInviteState } from './game-invite-bridge.js';
+import {XboxTitlePresence} from './xbox-title-presence.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+function nativeText(text: string): string {
+  return nativeTranslator(store?.settings.interfaceLanguage ?? 'system', app.getPreferredSystemLanguages?.() ?? ['en']).text(text);
+}
 const downloadNotifications = new DownloadCompletionNotifications({
   isSupported: () => Notification.isSupported(),
   show: options => {
-    const notification = new Notification({ ...options, icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)), urgency: 'normal' });
+    const notification = new Notification({ ...options, title: nativeText(options.title), body: nativeText(options.body), icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)), urgency: 'normal' });
     notification.on('failed', () => console.warn('The desktop could not display a download completion notification.'));
     notification.show();
   },
 });
 let mainWindow: BrowserWindow | null = null;
+async function showFriends(): Promise<void> {
+  await showLauncher();
+  mainWindow?.webContents.send('open-friends');
+}
 let store: StateStore;
 let backend: BackendManager;
 let backendDiagnostics: BackendDiagnostics;
@@ -88,6 +103,7 @@ const downloadLimitControls = new DownloadBandwidthControls();
 const installQueue = new InstallQueue(() => finishShortcutSession());
 const gameDisplay = new GameDisplayBlocker(powerSaveBlocker);
 const serviceSessions = new Map<string, XodusServiceSession>();
+const gameInviteBridges=new Map<string,GameInviteBridge>();
 const preparationControllers = new Map<string, AbortController>();
 let gameOperation: GameOperation | undefined;
 let gameRemovalInProgress = false;
@@ -102,11 +118,19 @@ let initialWalletAttempted = false;
 const catalog = new CatalogService();
 const gameActivities = new GameActivities();
 const gameAchievements = new GameAchievementsReader();
-const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market));
+const recentPcGamePass = new RecentPcGamePass();
+const accountLibrary = new AccountLibrary((ids, market) => catalog.licensedProducts(ids, market), undefined, market => recentPcGamePass.get(market));
 const installPlans = new InstallPlans(readInstallPlan);
 const demoMode = process.env.XODUS_DEMO === '1';
 const walletUnlocker = new WalletUnlocker();
+const xboxSocial = new XboxSocialSessions(() => {
+  const status = backend?.current;
+  return !shutdownStarted && !authState.running && authState.stored === true && authState.username
+    && status?.available && status.binaryPath && status.capabilities.commands.includes('social')
+    ? { account: authState.username, binary: status.binaryPath } : undefined;
+});
 const keyringSupport = new KeyringSupport(process.env, undefined, process.platform, undefined, {
+  diagnostic: value => backendDiagnostic({ operation: 'keyring', event: 'diagnostic', keyring: value, elapsedMs: value.elapsedMs }),
   canCreate: () => Boolean(backend?.current.capabilities.commands.includes('keyring-create')),
   create: () => {
     if (shutdownStarted || !mainWindow || mainWindow.isDestroyed()) return Promise.resolve('cancelled');
@@ -179,7 +203,7 @@ async function showLauncher(): Promise<void> {
 }
 async function shortcutError(error: unknown): Promise<void> {
   await showLauncher();
-  await dialog.showMessageBox(mainWindow!, { type: 'error', title: 'Unable to launch game',
+  await dialog.showMessageBox(mainWindow!, { type: 'error', title: nativeText('Unable to launch game'),
     message: error instanceof Error ? error.message : 'The game could not be launched.' });
 }
 function finishShortcutSession(): void {
@@ -207,6 +231,7 @@ function snapshot(): AppSnapshot {
     gameUpdates: structuredClone(gameUpdates),
     downloadProgressSupported: Boolean(backend.current.capabilities.streamingProgressJson),
     gameOperation: gameOperation ? structuredClone(gameOperation) : undefined,
+    social: combinedInviteState(gameInviteBridges.values()),
   };
 }
 
@@ -352,6 +377,7 @@ async function refreshAccount(emit = true, afterAuth = false): Promise<AuthStatu
     }
     return next;
   }, async next => {
+    if (authState.username !== next.username || next.stored !== true) xboxSocial.close();
     authState = { ...authState, ...next };
     accountLibrary.select(authState.stored === true ? authState.username : undefined,
       status.capabilities.library ? status.binaryPath : undefined, currentMarket());
@@ -419,6 +445,7 @@ async function runAuth(command: 'login' | 'logout'): Promise<void> {
   accountLibrary.reset();
   gameActivities.select();
   gameAchievements.select();
+  xboxSocial.close();
   authState = { ...authState, running: true, lastResult: undefined };
   emitSnapshot();
   try {
@@ -426,7 +453,7 @@ async function runAuth(command: 'login' | 'logout'): Promise<void> {
       throw Error('Update the Nexus backend in Settings before signing in with this launcher.');
     }
     if (command === 'login') await prepareSystemWallet();
-    const view = fallbackAuthViewFactory(request => authViewFactory(mainWindow ?? undefined, undefined, request), () => browserAuthViewFactory());
+    const view = fallbackAuthViewFactory(request => authViewFactory(mainWindow ?? undefined, undefined, request, nativeText), () => browserAuthViewFactory());
     if (shutdownStarted) throw Error('The launcher is closing.');
     await accountProfile.select(undefined);
     if (shutdownStarted) throw Error('The launcher is closing.');
@@ -891,6 +918,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
   writeLaunchLog(`Wine: ${wine}`);
   emitSnapshot();
   let serviceSession: XodusServiceSession | undefined;
+  let inviteBridge: GameInviteBridge | undefined;
   let launchWrapper: GameWrapper | undefined;
   let releaseDisplay = () => {};
   try {
@@ -900,7 +928,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
     const steamRoot = path.join(app.getPath('home'), '.steam', 'root');
     launchWrapper = await prepareGameWrapper(wine, game.launchTools, path.join(dataRoot, 'launch-wrappers'), process.env, game.path);
-    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, steamRoot, launchWrapper.command);
+    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, steamRoot, launchWrapper.command, store.settings.shaderCacheLimitGiB);
     const wineCommand = protonRunner?.command ?? wine;
     args[2] = preparedGameWine(protonRunner, launchWrapper.command);
     if (inspected.vcRedistEncrypted) {
@@ -917,6 +945,8 @@ async function prepareGameLaunch(id: string): Promise<void> {
     // Never inherit another title's discovery list. Hints are scoped public
     // metadata, not licenses, and cannot make an optional lookup block Play.
     delete environment.NEXUS_RELATED_PRODUCT_IDS;
+    delete environment.NEXUS_INVITE_PORT;
+    delete environment.NEXUS_INVITE_KEY;
     if (await storeDiscoveryRuntime(wine)) {
       const related = await contentManager().relatedProducts(game, accountLibrary.peekAccess(), currentMarket()).catch(() => {
         addGameLog('Additional DLC discovery unavailable. Continuing with package-declared content.');
@@ -942,6 +972,18 @@ async function prepareGameLaunch(id: string): Promise<void> {
       environment.XODUS_BRIDGE_KEY = serviceSession.bridgeKey;
       environment.XODUS_SAVE_SYNC = 'auto';
       addGameLog('Xbox cloud save preview is enabled. Saves may download from and upload to the account cloud.');
+    }
+    if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&await gameInviteRuntime(wine)){
+      const account=authState.username,epoch=xboxSocial.epoch;
+      const current=()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch;
+      inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),current,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
+        if(!Notification.isSupported())return;
+        try{const notice=new Notification({title:nativeText('Game invitation'),body:nativeText(`${sender} invited you to ${game.title}. Open Friends to accept.`),urgency:'normal'});notice.on('click',()=>{void showFriends().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
+      },new XboxTitlePresence(current,addGameLog));
+      try{
+        await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
+        environment.NEXUS_INVITE_PORT=String(inviteBridge.port);environment.NEXUS_INVITE_KEY=inviteBridge.key;
+      }catch{await inviteBridge.stop().catch(()=>{});inviteBridge=undefined;addGameLog('Optional game invitations are unavailable for this launch.');}
     }
     if (protonRunner) addGameLog(`Proton prefix: ${protonRunner.compatibilityDataPath}/pfx`);
     else await fs.mkdir(legacyPrefixRoot, { recursive: true });
@@ -984,6 +1026,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       try {
         operations.delete(operationId);
         gameProcesses.delete(operationId);
+        await inviteBridge?.stop().catch(()=>{});gameInviteBridges.delete(operationId);
         if (serviceSession) {
           await serviceSession.stop().catch((error) => addGameLog(`Account service cleanup failed: ${(error as Error).message}`));
           serviceSessions.delete(operationId);
@@ -998,6 +1041,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     });
   } catch (error) {
     releaseDisplay();
+    await inviteBridge?.stop().catch(()=>{});gameInviteBridges.delete(operationId);
     await launchWrapper?.cleanup().catch(() => undefined);
     if (serviceSession) {
       await serviceSession.stop().catch(() => undefined);
@@ -1053,7 +1097,7 @@ async function installGameVcRuntime(id: string): Promise<void> {
   preparationControllers.set(operationId, controller);
   try {
     const compatibilityDataPath = path.join(dataRoot, 'compatdata', game.id);
-    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'));
+    const protonRunner = await prepareProtonRunner(wine, compatibilityDataPath, path.join(app.getPath('home'), '.steam', 'root'), undefined, store.settings.shaderCacheLimitGiB);
     if (!protonRunner) throw new Error('VC++ installation requires a full Proton runtime, not a standalone Wine binary.');
     const prefix = path.join(compatibilityDataPath, 'pfx');
     const previous = await installedVcRuntimeVersion(prefix);
@@ -1258,6 +1302,24 @@ function registerIpc(): void {
     emitSnapshot();
   });
   ipcMain.handle('account-refresh', () => refreshAccount());
+  const socialClient=(event:Electron.IpcMainInvokeEvent)=>{
+    if(event.sender!==mainWindow?.webContents)throw Error('Unknown social window.');
+    if(event.senderFrame!==event.sender.mainFrame)throw Error('Unknown social frame.');
+    return xboxSocial.client(event.sender.id);
+  };
+  ipcMain.handle('xbox-friends', event => socialClient(event).friends());
+  ipcMain.handle('xbox-conversation', (event, xuid: unknown) => socialClient(event).conversation(xuid));
+  ipcMain.handle('xbox-send-message', (event, xuid: unknown, text: unknown) => socialClient(event).send(xuid, text));
+  ipcMain.handle('xbox-social-close', event => socialClient(event).close());
+  const invitation=(event:Electron.IpcMainInvokeEvent,id:unknown)=>{
+    socialClient(event);if(typeof id!=='string'||id.length>160)throw Error('Invalid invitation.');
+    const bridge=[...gameInviteBridges.values()].find(value=>id.startsWith(value.id+':'));
+    if(!bridge)throw Error('The game is no longer running.');return {bridge,id};
+  };
+  ipcMain.handle('game-invite-choose',(event,id:unknown,xuid:unknown)=>{const value=invitation(event,id);value.bridge.choose(value.id,xuid);});
+  ipcMain.handle('game-invite-cancel',(event,id:unknown)=>{const value=invitation(event,id);value.bridge.cancel(value.id);});
+  ipcMain.handle('game-invite-accept',(event,id:unknown)=>{const value=invitation(event,id);value.bridge.accept(value.id);});
+  ipcMain.handle('game-invite-friend',(event,id:unknown,xuid:unknown)=>{socialClient(event);if(typeof id!=='string'||id.length>100)throw Error('Invalid game.');const bridge=gameInviteBridges.get(id);if(!bridge)throw Error('The game is no longer running.');bridge.invite(xuid);});
   ipcMain.handle('keyring-check', () => keyringSupport.check());
   ipcMain.handle('keyring-start', async () => {
     ensureIdle();
@@ -1310,10 +1372,10 @@ function registerIpc(): void {
   ipcMain.handle('catalog-search', (_event, query: string, cursor?: string) => {
     return catalog.search(query, catalogMarket(), cursor);
   });
-  ipcMain.handle('account-library', (_event, kind: 'all' | 'owned' | 'gamepass', cursor?: string, refresh = false) => {
+  ipcMain.handle('account-library', (_event, kind: 'all' | 'owned' | 'gamepass' | 'other', cursor?: string, refresh = false, sort?: 'recent-gamepass') => {
     if (authState.running || authState.stored !== true) throw Error('Finish signing in before loading account games.');
     accountLibrary.select(authState.username, backend.current.capabilities.library ? backend.current.binaryPath : undefined, currentMarket());
-    return accountLibrary.get(kind, cursor, refresh);
+    return accountLibrary.get(kind, cursor, refresh, sort);
   });
   ipcMain.handle('read-backend-diagnostic-log', () => backendDiagnostics.read());
   ipcMain.handle('create-diagnostic-report', async (_event, gameId?: string) => {
@@ -1327,13 +1389,14 @@ function registerIpc(): void {
   ipcMain.handle('save-diagnostic-report', (_event, content: unknown) => saveReviewedReport(content));
   ipcMain.handle('catalog-featured', () => catalog.featured(catalogMarket()));
   ipcMain.handle('start-install', (_event, request: InstallRequest) => startInstall(request));
-  ipcMain.handle('install-plan', async (_event, raw: string) => {
+  ipcMain.handle('install-plan', async (_event, raw: string, destination?: string) => {
     const binary = requireBackend('streaming');
     if (!backend.current.capabilities.packageSelection) throw Error('Update the Xodus backend in Settings to choose installation packages.');
     const productId = safeProductId(raw), market = currentMarket();
+    const availableBytes = destination === undefined ? undefined : await availableInstallBytes(destination);
     const plan = await installPlans.get(binary, productId, market, Boolean(backend.current.capabilities.contentPackageSelection));
     if (binary !== backend.current.binaryPath || market !== currentMarket()) throw Error('Backend or Store market changed. Try again.');
-    return plan;
+    return { ...plan, availableBytes };
   });
   ipcMain.handle('game-content', async (_event, id: string) => (await gameContent(id)).plan);
   ipcMain.handle('install-game-content', (_event, id: string, productId: string) => installGameContent(id, productId));
@@ -1493,19 +1556,19 @@ function registerIpc(): void {
     const artwork = game ? { cover: await gameSteamPortrait(cover ?? fallback).catch(() => cover ?? fallback), wide: wide ?? cover ?? fallback }
       : await nexusSteamArtwork(fallback).catch(() => ({ cover: fallback, wide: fallback }));
     if (await steamRunning()) return addLiveSteamShortcut(accounts, launch, desktop, artwork, undefined, undefined, async existing => {
-      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: 'Steam shortcut already exists',
-        message: 'Reuse an existing shortcut, or ask Steam to add it for the currently signed-in account?',
-        detail: 'Choose an existing profile to avoid creating a duplicate in that account.',
+      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: nativeText('Steam shortcut already exists'),
+        message: nativeText('Reuse an existing shortcut, or ask Steam to add it for the currently signed-in account?'),
+        detail: nativeText('Choose an existing profile to avoid creating a duplicate in that account.'),
         cancelId: existing.length + 1, defaultId: existing.length + 1,
-        buttons: [...existing.map(account => `Use Steam profile ${path.basename(path.dirname(account))}`), 'Add for signed-in account', 'Cancel'] });
+        buttons: [...existing.map(account => nativeText(`Use Steam profile ${path.basename(path.dirname(account))}`)), nativeText('Add for signed-in account'), nativeText('Cancel')] });
       if (!Number.isInteger(choice.response) || choice.response < 0 || choice.response > existing.length) throw Error('Add to Steam cancelled.');
       return choice.response === existing.length ? undefined : existing[choice.response];
     });
     let selected = 0;
     if (accounts.length > 1) {
-      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: 'Choose Steam profile',
-        message: 'Which Steam profile should receive this shortcut?', cancelId: accounts.length, defaultId: accounts.length,
-        buttons: [...accounts.map(account => `Steam profile ${path.basename(path.dirname(account))}`), 'Cancel'] });
+      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: nativeText('Choose Steam profile'),
+        message: nativeText('Which Steam profile should receive this shortcut?'), cancelId: accounts.length, defaultId: accounts.length,
+        buttons: [...accounts.map(account => nativeText(`Steam profile ${path.basename(path.dirname(account))}`)), nativeText('Cancel')] });
       selected = choice.response;
       if (selected >= accounts.length) throw Error('Add to Steam cancelled.');
     }
@@ -1550,21 +1613,28 @@ function registerIpc(): void {
     emitSnapshot();
   });
   ipcMain.handle('update-settings', async (_event, patch: Partial<Settings>) => {
+    if (patch.shaderCacheLimitGiB !== undefined) shaderCacheLimits(patch.shaderCacheLimitGiB);
     if (patch.downloadLimitMiB !== undefined) {
       downloadLimitKiB(patch.downloadLimitMiB);
       downloadLimitArgs(patch.downloadLimitMiB, backend.current.capabilities);
     }
     if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const).some(key => patch[key] !== undefined && patch[key] !== store.settings[key])) ensureIdle();
     const allowed: Partial<Settings> = {};
+    if (patch.interfaceLanguage !== undefined) {
+      if (interfaceLanguagePreference(patch.interfaceLanguage) !== patch.interfaceLanguage) throw Error('Invalid interface language.');
+      allowed.interfaceLanguage = patch.interfaceLanguage;
+    }
+    if (patch.shaderCacheLimitGiB !== undefined) allowed.shaderCacheLimitGiB = patch.shaderCacheLimitGiB;
     if (patch.downloadLimitMiB !== undefined) allowed.downloadLimitMiB = patch.downloadLimitMiB;
     if (typeof patch.installRoot === 'string') allowed.installRoot = path.resolve(patch.installRoot);
     if (typeof patch.market === 'string' && /^[A-Za-z-]{2,20}$/.test(patch.market)) allowed.market = patch.market;
     if (typeof patch.parallelDownloads === 'number') allowed.parallelDownloads = Math.max(1, Math.min(16, Math.round(patch.parallelDownloads)));
     if (typeof patch.winePath === 'string') allowed.winePath = patch.winePath;
-    if (typeof patch.externalXodusRoot === 'string') allowed.externalXodusRoot = path.resolve(patch.externalXodusRoot);
+    if (typeof patch.externalXodusRoot === 'string') allowed.externalXodusRoot = patch.externalXodusRoot.trim() ? path.resolve(patch.externalXodusRoot) : '';
     if (typeof patch.runtimeRoot === 'string') allowed.runtimeRoot = path.resolve(patch.runtimeRoot);
     if (typeof patch.verboseLogs === 'boolean') allowed.verboseLogs = patch.verboseLogs;
     if (typeof patch.firstRunCompleted === 'boolean') allowed.firstRunCompleted = patch.firstRunCompleted;
+    const previous = store.settings;
     const settings = await store.setSettings(allowed);
     if (patch.downloadLimitMiB !== undefined) {
       try { await downloadLimitControls.apply(settings.downloadLimitMiB ?? 0); }
@@ -1572,6 +1642,11 @@ function registerIpc(): void {
     }
     // A bandwidth-only change must not restart authentication or refresh devices.
     if (isBandwidthOnlyPatch(patch)) { emitSnapshot(); return settings; }
+    if (isShaderCacheOnlyPatch(patch)) { emitSnapshot(); return settings; }
+    // Cosmetic/storage preferences do not change the selected components or
+    // account scope, including a full unchanged Settings form saved by the UI.
+    if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const)
+      .every(key => settings[key] === previous[key])) { emitSnapshot(); return settings; }
     backend.setExternalRoot(settings.externalXodusRoot);
     runtime.setRoot(settings.runtimeRoot);
     await backend.refresh();
@@ -1628,6 +1703,19 @@ function restoredBoundsOnScreen(state: WindowState): boolean {
   });
 }
 
+async function prepareFirstRunBackend(): Promise<void> {
+  await backend.checkUpdate();
+  emitSnapshot();
+  if (shutdownStarted || store.settings.firstRunCompleted || backend.current.available ||
+      backend.current.updating || !backend.current.releaseAvailable || !backend.current.updateAvailable) return;
+  try {
+    // Uses the same checksum-verified managed installer and activity guards as Settings.
+    await backend.update(emitSnapshot);
+    if (!shutdownStarted && mainWindow?.isVisible()) void refreshInitialAccount().catch(() => {});
+  } catch { /* Keep the installer error visible for an explicit retry in the wizard. */ }
+  finally { emitSnapshot(); }
+}
+
 async function createWindow(): Promise<void> {
   const smokeScreenshot = process.env.XODUS_NEXUS_SMOKE_SCREENSHOT;
   const smokeStoreQuery = process.env.XODUS_NEXUS_SMOKE_STORE_QUERY;
@@ -1643,20 +1731,27 @@ async function createWindow(): Promise<void> {
     ? windowState
     : { x: undefined as number | undefined, y: undefined as number | undefined,
         width: 1440, height: 900, maximized: false };
+  // On small screens (for example a Steam Deck with 1280x800 pixels),
+  // a window as large as the work area is still too tall: the window manager
+  // adds its title bar, and on Wayland the work area often includes the
+  // panel. Maximize instead, so that the window manager fits it.
+  const area = bounds.x === undefined || bounds.y === undefined
+    ? screen.getPrimaryDisplay().workArea
+    : screen.getDisplayMatching({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }).workArea;
+  const tooLarge = bounds.width >= area.width || bounds.height >= area.height;
   if (bounds.x === undefined) {
-    const primary = screen.getPrimaryDisplay();
-    bounds.width = Math.min(bounds.width, primary.workArea.width);
-    bounds.height = Math.min(bounds.height, primary.workArea.height);
-    bounds.x = primary.workArea.x + Math.floor((primary.workArea.width - bounds.width) / 2);
-    bounds.y = primary.workArea.y + Math.floor((primary.workArea.height - bounds.height) / 2);
+    bounds.width = Math.min(bounds.width, area.width);
+    bounds.height = Math.min(bounds.height, area.height);
+    bounds.x = area.x + Math.floor((area.width - bounds.width) / 2);
+    bounds.y = area.y + Math.floor((area.height - bounds.height) / 2);
   }
   mainWindow = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     x: bounds.x,
     y: bounds.y,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: Math.min(800, area.width),
+    minHeight: Math.min(600, area.height),
     backgroundColor: '#080a0c',
     title: 'Xodus Nexus',
     icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)),
@@ -1675,9 +1770,10 @@ async function createWindow(): Promise<void> {
   if (smokeScreenshot) mainWindow.webContents.on('console-message', (_event, level, message) => console.error(`Renderer console [${level}]`, message));
   if (!hiddenCapture) mainWindow.once('ready-to-show', () => mainWindow?.show());
   if (!hiddenCapture) {
-    if (windowState?.maximized) mainWindow.maximize();
+    if (windowState?.maximized || tooLarge) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
+  mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void openDesktopTarget(url, () => shell.openExternal(url))
       .catch(() => console.warn('Could not open the external browser.'));
@@ -1749,7 +1845,7 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
-  if (startupError) { dialog.showErrorBox('Invalid Nexus shortcut', startupError.message); app.quit(); return; }
+  if (startupError) { dialog.showErrorBox(nativeText('Invalid Nexus shortcut'), startupError.message); app.quit(); return; }
   if (!demoMode) {
     backendDiagnostics = new BackendDiagnostics(app.getPath('userData'), () => ({
       launcher: app.getVersion(), backend: backend?.current.version, source: backend?.current.source,
@@ -1816,20 +1912,7 @@ app.whenReady().then(async () => {
   backend = new BackendManager(app.getPath('userData'), store.settings.externalXodusRoot, emitLog, () => keyringSupport.busy || downloadCancellations.size > 0 || operations.size > 0 || installQueue.size > 0 || preparingInstall || runtime?.current.updating === true);
   await backend.refresh();
   await runtime.refresh();
-  void backend.checkUpdate().then(async () => {
-    // First run: install the prebuilt backend automatically so the setup
-    // wizard's sign-in step works without a detour into Settings. Users who
-    // configured a validated external backend are left alone; the managed
-    // release never touches an external checkout.
-    if (!store.settings.firstRunCompleted && !backend.current.available &&
-        backend.current.releaseAvailable && backend.current.updateAvailable) {
-      try {
-        await backend.update(emitSnapshot);
-        if (mainWindow?.isVisible()) void refreshInitialAccount().catch(() => { /* The setup UI remains usable. */ });
-      } catch { /* The block reason stays visible in the wizard and Settings. */ }
-    }
-    emitSnapshot();
-  }, () => { /* Keep the installed backend available if GitHub is unreachable. */ });
+  void prepareFirstRunBackend().catch(() => emitSnapshot());
   void runtime.checkNexus().then(() => emitSnapshot(), () => { /* Nexus runtime is optional. */ });
   await syncManagedWinePath();
   void enrichLibraryCovers().then(() => emitSnapshot(), () => { /* Covers are optional. */ });
@@ -1851,7 +1934,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => { void showLauncher(); });
 }).catch((error) => {
   console.error(error);
-  if (startupRequest.gameId && primaryInstance) dialog.showErrorBox('Unable to start Nexus', error instanceof Error ? error.message : String(error));
+  if (startupRequest.gameId && primaryInstance) dialog.showErrorBox(nativeText('Unable to start Nexus'), error instanceof Error ? error.message : String(error));
   app.quit();
 });
 
@@ -1859,19 +1942,21 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !shortcutOnly) app.quit();
 });
 
-app.on('will-quit', () => gameDisplay.stop());
+app.on('will-quit', () => {gameDisplay.stop();});
 
 app.on('before-quit', (event) => {
+  xboxSocial.close();
   walletUnlocker.cancel();
   installQueue.stop();
   installQueue.stop();
   accountLibrary.reset();
   accountProfile?.cancel();
   accountRefresh.invalidate();
-  if (shutdownStarted || (!walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
+  if (shutdownStarted || (!xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && gameInviteBridges.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
   event.preventDefault();
   shutdownStarted = true;
   void (async () => {
+    await xboxSocial.settled();
     await walletUnlocker.stop();
     gameUpdateController?.abort();
     await gameUpdateJob?.catch(() => {});
@@ -1898,6 +1983,7 @@ app.on('before-quit', (event) => {
       new Promise<void>((resolve) => setTimeout(resolve, 8_000)),
     ]);
     await Promise.all([...gameProcesses.values()].map((process) => process.forceStop().catch((error) => console.error('Could not force-stop game on exit:', error))));
+    await Promise.all([...gameInviteBridges.values()].map(bridge=>bridge.stop().catch(()=>{})));
     await Promise.all([...serviceSessions.values()].map((session) => session.stop().catch((error) => console.error('Account service cleanup failed on exit:', error))));
   })().catch((error) => console.error('Launcher shutdown cleanup failed:', error)).finally(async () => {
     await backendDiagnostics?.flush();

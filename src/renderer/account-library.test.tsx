@@ -6,6 +6,22 @@ import { defaultLaunchTools } from '../shared/launch-tools';
 import { demoSnapshot } from '../shared/demo-data';
 import type { AccountLibraryPage } from '../shared/types';
 
+it('offers the explicit recent PC Game Pass order only within the Game Pass access filter',()=>{
+ const data=demoSnapshot();
+ const filters:LibraryFilters={kind:'gamepass',playState:'all',query:'',sort:'recent-gamepass'};
+ const html=renderToStaticMarkup(<AccountGames data={data} toast={()=>{}} filters={filters} />);
+ expect(html).toContain('aria-label="Library order"');expect(html).toContain('Recently added to Game Pass');
+ expect(html).toContain('PC Game Pass recently added collection');
+ for(const kind of ['all','owned','other'] as const)
+  expect(renderToStaticMarkup(<AccountGames data={data} toast={()=>{}} filters={{...filters,kind}} />)).not.toContain('aria-label="Library order"');
+});
+
+it('offers a configurable four-GiB driver shader cache limit with a separate save action',()=>{
+  const data=demoSnapshot();let html=renderToStaticMarkup(<SettingsPage data={data} toast={()=>{}} />);
+  expect(html).toContain('Driver cache limit (GiB)');expect(html).toContain('Default: 4 GiB');expect(html).toContain('Save cache limit');expect(html).toContain('next game launch');
+  data.settings.shaderCacheLimitGiB=8.5;html=renderToStaticMarkup(<SettingsPage data={data} toast={()=>{}} />);expect(html).toContain('value="8.5"');
+});
+
 it('keeps unknown-source counts in diagnostics instead of rendering a technical library banner', () => {
   const source = readFileSync('src/renderer/App.tsx', 'utf8');
   const library = source.slice(source.indexOf('export function AccountGames('), source.indexOf('function AccountGamesForUser('));
@@ -13,7 +29,7 @@ it('keeps unknown-source counts in diagnostics instead of rendering a technical 
   expect(library).not.toContain('Some active licenses have an unrecognized source');
   // Actual failures and incomplete results still need a visible way to debug.
   expect(library).toContain('visible?.skippedEntitlements || visible?.excludedEntitlements');
-  expect(library).toContain('Some license records could not be verified and were omitted.');
+  expect(library).toContain('ui.some_license_records_could_not_be_verified_and_w_8d3b7e0');
   expect(library).toContain('{error ?');
   expect(library).toContain('<BackendLogButton toast={toast} />');
   const settings = renderToStaticMarkup(<SettingsPage data={demoSnapshot()} toast={() => {}} />);

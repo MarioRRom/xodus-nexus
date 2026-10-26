@@ -38,8 +38,9 @@ For an application-menu installation on supported distributions:
 curl -fsSL https://raw.githubusercontent.com/domsvoboda/xodus-nexus/main/scripts/install.sh | bash
 ```
 
-In **Settings**, install the **Nexus backend** and **Nexus runtime**, then sign in
-with your Microsoft account. A valid game purchase or subscription is required.
+On first startup, the launcher installs and verifies the **Nexus backend** in
+the background so you can sign in during setup. Install the **Nexus runtime**
+from **Settings** before launching games. A valid purchase or subscription is required.
 
 If passkey sign-in gets stuck, choose **Continue in browser** in the sign-in
 window. This option requires Google Chrome, either a native installation or the
@@ -50,8 +51,10 @@ Flatpak version available through Discover. Other browsers are not supported.
 ## Use
 
 - **My Library** combines owned, Game Pass and installed games, with Access, Play state and title filters.
+- In **My Library → In Game Pass**, choose **Recently added to Game Pass** to show games in Microsoft's recent PC collection first.
 - Open a game for its description, categories, screenshot gallery and available Xbox achievements, time played and last activity. Xbox data depends on the account and game.
 - **Store** lets you browse and install supported PC games.
+- New game installations show the estimated download size and free space on the destination drive. The downloader checks exact space requirements.
 - **Manage content** installs licensed add-ons and campaign packages.
 - **Install Queue** downloads games one at a time and lets you add more while downloading or playing another game. Pause and resume are supported, including manual resume after restarting the launcher.
 - Cancelling a new installation can keep or delete its partial files. Existing games, updates and DLC keep their files.
@@ -60,8 +63,18 @@ Flatpak version available through Discover. Other browsers are not supported.
 - Game settings offer an optional **DualSense compatibility mode** if a standard DualSense is not detected. It applies only to that game and may disable advanced haptics and adaptive triggers.
 - Choose **Add to Steam** in the game menu, or **Add Nexus to Steam** in Settings, to create a Non-Steam shortcut with available artwork. Steam can stay running, including in Game Mode. Requires native Linux Steam; Flatpak Steam is not yet supported.
 - Update the launcher, backend and runtime in **Settings**.
+- **Settings → Interface language** selects a bundled translation independently of game language and Store region. Missing translations fall back to English.
 - **Settings → Downloads** sets a combined game download speed limit in MiB/s (0 means unlimited). A supporting Nexus backend is required; saving the limit also applies it to active downloads.
+- **Settings → Shader cache** sets the per-game Mesa/NVIDIA driver cache limit, 4 GiB by default. Changes apply on the next game launch; explicit environment overrides take precedence.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
+
+## Xbox friends and chat (experimental)
+
+Open **Friends** in the bottom-right corner for your Xbox friends list, text conversations and game invitations. Chat requires a compatible Nexus backend and your account's communication permissions. The visible panel refreshes conversations automatically. If delivery cannot be confirmed, check the conversation before sending again.
+
+With a compatible launcher and runtime, supported games also publish their Xbox playing status after sign-in. The game is removed from that status when it closes; Xbox privacy settings still apply.
+
+Invitations require a compatible Nexus runtime and a running game. Use the game's **Invite friends** action to choose a friend, or select **Invite to game** when the game has published a joinable activity. Incoming invitations appear in Friends and can be accepted there. This does not add multiplayer support to games that cannot connect to their services.
 
 ## Wallet setup and unlocking
 
@@ -93,9 +106,10 @@ Other license errors can have different causes.
 
 Every game uses the same launch path and shared runtime.
 
-The experimental [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
-is based on Valve's Proton Experimental. It is not yet installed automatically
-by released launchers.
+Runtime updates are downloaded from [Nexus Runtime](https://github.com/domsvoboda/nexus-runtime)
+in **Settings**. It is based on Valve's Proton Experimental with
+[Nexus Wine](https://github.com/domsvoboda/nexus-wine) and
+[Nexus XGameRuntime](https://github.com/domsvoboda/nexus-xgameruntime).
 
 ## Compatible games
 
@@ -104,7 +118,7 @@ but have not been verified and may encounter compatibility issues.
 
 | Game | Playable | Status |
 | --- | --- | --- |
-| Gears of War: E-Day | Yes | Playable online. |
+| Gears of War: E-Day | Yes | Playable online; Xbox playing status works. |
 | Deep Rock Galactic | Yes | Playable online. |
 | Minecraft Dungeons | Yes | Playable online with launcher 0.3.5; [ownership failures](https://github.com/domsvoboda/xodus-nexus/issues/80) also reported on other setups. |
 | Minecraft Dungeons II | Yes | Playable online. |
@@ -115,6 +129,8 @@ but have not been verified and may encounter compatibility issues.
 | Forza Horizon 6 | Yes | Playable online; some setups need [VC++ prerequisites](https://github.com/domsvoboda/xodus-nexus/issues/96). [Loading failures](https://github.com/domsvoboda/xodus-nexus/issues/13) also reported. |
 | Palworld | Yes | Playable online. |
 | DOOM Eternal | Yes | Playable. |
+| Ori and the Will of the Wisps | Partial | Unreleased Experimental runtime: sign-in and main menu work; gameplay unverified. |
+| Like a Dragon: Infinite Wealth | Partial | Unreleased Experimental runtime: main menu works; gameplay unverified. |
 | DOOM: The Dark Ages | Yes | Playable (user report). |
 | Fallout 76 | Yes | Playable online; [one reported setup](https://github.com/domsvoboda/xodus-nexus/issues/9#issuecomment-6227548598) requires gamescope to display correctly. |
 | The Outer Worlds 2 | Yes | Playable. |
@@ -189,3 +205,5 @@ The Nexus runtime includes [FFmpeg](https://ffmpeg.org/) shared libraries under
 LGPL 2.1 or later; its corresponding pinned source and build recipe accompany
 each runtime release.
 [Contributing](CONTRIBUTING.md)
+
+Community translations: [translation guide](docs/TRANSLATING.md).

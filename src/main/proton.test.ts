@@ -197,6 +197,34 @@ describe('prepareProtonRunner', () => {
     expect(stdout.trim()).toBe(explicit || eac);
   });
 
+  it("keeps each game's shader caches beside its prefix without overriding configuration", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'xodus-nexus-shader-cache-'));
+    created.push(root);
+    const files = path.join(root, 'runtime/files');
+    const wine = path.join(files, 'bin/wine');
+    const compat = path.join(root, "compat game's data");
+    const system32 = path.join(compat, 'pfx/drive_c/windows/system32');
+    await mkdir(path.dirname(wine), { recursive: true });
+    await mkdir(path.join(files, 'share/default_pfx'), { recursive: true });
+    await mkdir(system32, { recursive: true });
+    for (const dll of ['libvkd3d-utils-1.dll', 'dxgi.dll', 'd3d12.dll']) await writeFile(path.join(system32, dll), 'ready');
+    await writeFile(wine, '#!/bin/sh\nprintf \'%s\\n\' "$VKD3D_SHADER_CACHE_PATH" "$__GL_SHADER_DISK_CACHE_PATH" "$__GL_SHADER_DISK_CACHE" "$__GL_SHADER_DISK_CACHE_SKIP_CLEANUP" "$MESA_SHADER_CACHE_DIR" "$MESA_SHADER_CACHE_MAX_SIZE" "$__GL_SHADER_DISK_CACHE_SIZE"\n');
+    await chmod(wine, 0o700);
+    await writeFile(path.join(files, '../proton'), '#!/bin/sh\nexit 0\n');
+    await chmod(path.join(files, '../proton'), 0o700);
+    const runner = await prepareProtonRunner(wine, compat, path.join(root, 'steam'));
+    const cache = path.join(compat, 'shadercache');
+    for (const name of ['vkd3d-proton', 'nvidia', 'mesa']) expect((await stat(path.join(cache, name))).isDirectory()).toBe(true);
+    const clean = { ...process.env };
+    for (const name of ['VKD3D_SHADER_CACHE_PATH', '__GL_SHADER_DISK_CACHE_PATH', '__GL_SHADER_DISK_CACHE', '__GL_SHADER_DISK_CACHE_SKIP_CLEANUP', '__GL_SHADER_DISK_CACHE_SIZE', 'MESA_SHADER_CACHE_DIR', 'MESA_SHADER_CACHE_MAX_SIZE']) delete clean[name];
+    const defaults = await execFile(runner!.command, [], { env: clean });
+    expect(defaults.stdout.trim().split('\n')).toEqual([
+      path.join(cache, 'vkd3d-proton'), path.join(cache, 'nvidia'), '1', '', path.join(cache, 'mesa'), '4G', '4294967296',
+    ]);
+    const explicit = await execFile(runner!.command, [], { env: { ...clean, VKD3D_SHADER_CACHE_PATH: '/mine/vkd3d', __GL_SHADER_DISK_CACHE_PATH: '/mine/nv', MESA_SHADER_CACHE_DIR: '/mine/mesa' } });
+    expect(explicit.stdout.trim().split('\n').filter((line, index) => index === 0 || index === 1 || index === 4)).toEqual(['/mine/vkd3d', '/mine/nv', '/mine/mesa']);
+  });
+
   it.each([0, 23])('waits for launcher descendants and preserves launcher exit %s', async (launcherExit) => {
     const root = await mkdtemp(path.join(tmpdir(), 'xodus-nexus-proton-descendants-'));
     created.push(root);
@@ -470,6 +498,11 @@ describe('syncUnrealCultureGameIni', () => {
     expect(removed).not.toContain('Culture=');
     expect(removed).not.toContain('[Internationalization]');
     expect(lines.join('\n')).toContain('Removed the pinned Unreal text language');
+    expect((await stat(gameIni)).mode & 0o777).toBe(0o644);
+    await writeFile(gameIni, '[Internationalization]\nCulture=fr-FR\n');
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', undefined, () => {});
+    expect(await readFile(gameIni, 'utf8')).toBe('[Internationalization]\nCulture=fr-FR\n');
+    expect((await stat(gameIni)).mode & 0o777).toBe(0o644);
   });
 
   it('never touches a manually authored culture line', async () => {
@@ -483,6 +516,17 @@ describe('syncUnrealCultureGameIni', () => {
     expect(await readFile(gameIni, 'utf8')).toBe(manual);
     expect((await stat(gameIni)).mode & 0o222).not.toBe(0);
     expect(lines.join('\n')).toContain('manually configured');
+  });
+
+  it('releases only its managed pin and preserves other settings on System default', async () => {
+    const { prefix, configDirectory, install } = await makePrefix('reset');
+    const gameIni = path.join(configDirectory, 'Game.ini');
+    await writeFile(gameIni, '[Other]\nValue=1\n');
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', 'en', () => {});
+    await syncUnrealCultureGameIni(prefix, install, '6BE41AB5', undefined, () => {});
+    expect(await readFile(gameIni, 'utf8')).toContain('[Other]\nValue=1');
+    expect(await readFile(gameIni, 'utf8')).not.toContain('Culture=');
+    expect((await stat(gameIni)).mode & 0o222).not.toBe(0);
   });
 
   it('does nothing without a title id, for non-Unreal installs, or without a config directory', async () => {

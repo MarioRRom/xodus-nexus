@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
   game: undefined as undefined | { finish: (code?: number, output?: string) => void },
-  quit: vi.fn(),
+  quit: vi.fn(), maximize: vi.fn(),
   blockDisplay: vi.fn(() => 7), releaseDisplay: vi.fn(() => true),
   steamProfiles: [] as string[], steamIsRunning: true,
   liveImport: vi.fn(), offlineImport: vi.fn(), showMessage: vi.fn(),
@@ -30,6 +30,8 @@ const h = vi.hoisted(() => ({
   discoverySupported: false,
   libraryReads: 0,
   launchEnvironments: [] as NodeJS.ProcessEnv[],
+  backendRefreshes: 0, runtimeRefreshes: 0,
+  accountRequests: 0,
   prefixLocales: [] as (string | undefined)[],
   planOverrides: new Map<string, any>(),
   libraryRows: [] as any[],
@@ -43,14 +45,14 @@ vi.mock('electron', () => ({
     whenReady: () => Promise.resolve(), getVersion: () => '0.0.0', isPackaged: false, quit: h.quit },
   ipcMain: { handle: (name: string, callback: (...args: any[]) => any) => h.handlers.set(name, callback) },
   BrowserWindow: class { webContents = { on: vi.fn(), send: vi.fn(), setWindowOpenHandler: vi.fn() };
-    on() {} once() {} show() {} focus() {} isDestroyed() { return false; } async loadFile() {} },
+    on() {} once() {} show() {} focus() {} maximize = h.maximize; isDestroyed() { return false; } async loadFile() {} },
   screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
   dialog: { showMessageBox: h.showMessage, showSaveDialog: h.showSave }, nativeImage: {}, shell: { trashItem: h.trash }, powerSaveBlocker: { start: h.blockDisplay, stop: h.releaseDisplay },
 }));
 vi.mock('./backend.js', () => ({ LINUX_RUN_PATCH: 'test-patch', BackendManager: class {
-  get current() { return h.backend; } async refresh() {} async checkUpdate() {} async externalDownloadRunning() { return false; }
+  get current() { return h.backend; } async refresh() {h.backendRefreshes++;} async checkUpdate() {} async externalDownloadRunning() { return false; }
   setExternalRoot() {} } }));
-vi.mock('./runtime.js', () => ({ RuntimeManager: class { get current() { return h.runtime; } async refresh() {} async checkNexus() {} setRoot() {} } }));
+vi.mock('./runtime.js', () => ({ RuntimeManager: class { get current() { return h.runtime; } async refresh() {h.runtimeRefreshes++;} async checkNexus() {} setRoot() {} } }));
 vi.mock('./catalog.js', () => ({ CatalogService: class { async artwork() { return new Map(); } posters = h.posters; } }));
 vi.mock('./account-profile.js', () => ({ AccountProfile: class { async select() {} cancel() {} } }));
 vi.mock('./launcher-update.js', () => ({ LauncherUpdater: class { state = {}; async initialize() {} async check() {} cancel() {} } }));
@@ -82,12 +84,12 @@ vi.mock('./process.js', () => ({
       child: { kill: vi.fn(), stderr: { on() {}, removeListener() {} } },
       result: Promise.resolve({code:0,output:JSON.stringify({schema:1,account:'sample@example.test',market:'US',checkedAt:new Date().toISOString(),entitlements:h.libraryRows})}),
     }; }
-    if (args[0] === 'account') return {
+    if (args[0] === 'account') { h.accountRequests++;return {
       child: { kill: vi.fn(() => true) },
       result: h.holdAccountReads
         ? new Promise<{ code: number; output: string }>(resolve => { h.accountReads.push(resolve); })
         : Promise.resolve({ code: 0, output: JSON.stringify({ stored: true, username: 'sample@example.test' }) }),
-    };
+    }; }
     let resolve!: (result: { code: number; output: string }) => void, sequence = 0;
     const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
     const progress = (paused = false, phase = 'downloading') => options.onLine('NEXUS_PROGRESS ' + JSON.stringify({ schema: 1, event: 'progress', sequence: sequence++, phase,
@@ -107,6 +109,65 @@ vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_
 const ipc = (name: string, ...args: any[]) => h.handlers.get(name)!(undefined, ...args);
 const snapshot = () => ipc('get-snapshot');
 const install = (letter: string, destination = path.join(h.root, `download-${letter}`)) => ipc('start-install', { productId: `9${letter.repeat(11)}`, title: `Sample ${letter}`, destination });
+
+it('saves interface language without probing account, restarting components or altering game language and market', async () => {
+  const before = await snapshot();
+  const counts = [h.backendRefreshes, h.runtimeRefreshes, h.accountRequests, h.downloads.length];
+  const settings = await ipc('update-settings', { interfaceLanguage: 'cs' });
+  expect(settings).toEqual({ ...before.settings, interfaceLanguage: 'cs' });
+  expect([h.backendRefreshes, h.runtimeRefreshes, h.accountRequests, h.downloads.length]).toEqual(counts);
+  expect((await snapshot()).games).toEqual(before.games);
+  for (const value of ['../cs', 'cs_CZ', '', null, 42]) await expect(ipc('update-settings', { interfaceLanguage: value })).rejects.toThrow('Invalid interface language');
+  expect((await snapshot()).settings.interfaceLanguage).toBe('cs');
+  await ipc('update-settings', { interfaceLanguage: before.settings.interfaceLanguage ?? 'system' });
+});
+
+it('adds fresh advisory target storage to public package preflight without creating a folder or starting a transfer (#247)', async () => {
+  const destination=path.join(h.root,'storage-preview','game'),before=h.downloads.length;
+  const plan=await ipc('install-plan','9AAAAAAAAAAA',destination);
+  expect(plan.availableBytes).toBeTypeOf('number');expect(plan.choices[0].supported).toBe(true);
+  expect(await fs.access(path.dirname(destination)).then(()=>true,()=>false)).toBe(false);
+  expect(h.downloads).toHaveLength(before);
+  await expect(ipc('install-plan','9AAAAAAAAAAA','relative')).rejects.toThrow('absolute path');
+  expect((await ipc('install-plan','9AAAAAAAAAAA')).availableBytes).toBeUndefined();
+});
+
+it('saves shader cache limits through real IPC without refreshing components or changing installation state',async()=>{
+  const refreshes=[h.backendRefreshes,h.runtimeRefreshes],downloads=snapshot().downloads,library=snapshot().games;
+  await ipc('update-settings',{shaderCacheLimitGiB:8.5});expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(snapshot().downloads).toEqual(downloads);expect(snapshot().games).toEqual(library);
+  for(const value of [0,-1,'bad',2048])await expect(ipc('update-settings',{shaderCacheLimitGiB:value})).rejects.toThrow('Shader cache limit');
+  expect(snapshot().settings.shaderCacheLimitGiB).toBe(8.5);expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+});
+
+it('saves ordinary launcher preferences without re-probing components or reading the account', async () => {
+  const before=snapshot(),refreshes=[h.backendRefreshes,h.runtimeRefreshes],accounts=h.accountRequests;
+  const settings={...before.settings,installRoot:path.join(h.root,'future-games'),parallelDownloads:6,verboseLogs:!before.settings.verboseLogs};
+  await ipc('update-settings',settings);
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(h.accountRequests).toBe(accounts);
+  expect(snapshot().settings).toMatchObject({installRoot:settings.installRoot,parallelDownloads:6,verboseLogs:settings.verboseLogs});
+  expect(snapshot().settings.externalXodusRoot).toBe(before.settings.externalXodusRoot);
+  expect(snapshot().games).toEqual(before.games);expect(snapshot().downloads).toEqual(before.downloads);
+  expect(await fs.access(settings.installRoot).then(()=>true,()=>false)).toBe(false);
+  await ipc('update-settings',before.settings);
+  await ipc('update-settings',{externalXodusRoot:'   '});
+  expect(snapshot().settings.externalXodusRoot).toBe('');
+  expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(refreshes);
+  expect(h.accountRequests).toBe(accounts);
+});
+
+it.each(['market','winePath','externalXodusRoot','runtimeRoot'] as const)
+('still revalidates components and account scope after a real %s selection change',async key=>{
+  const previous=snapshot().settings[key],counts=[h.backendRefreshes,h.runtimeRefreshes],accounts=h.accountRequests;
+  const selected=key==='market'?'CZ':path.join(h.root,'selected-'+key);
+  try{
+    await ipc('update-settings',{[key]:selected});
+    expect([h.backendRefreshes,h.runtimeRefreshes]).toEqual(counts.map(n=>n+1));
+    expect(h.accountRequests).toBe(accounts+1);expect(snapshot().settings[key]).toBe(selected);
+  }finally{await ipc('update-settings',{[key]:previous});}
+});
 
 beforeAll(async () => {
   h.root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-install-integration-'));
@@ -138,6 +199,14 @@ beforeAll(async () => {
   });
   await import('./index.js');
   await vi.waitFor(() => expect(h.handlers.has('start-install')).toBe(true));
+  // The window deliberately precedes the asynchronous startup account check.
+  // Establish its completion before measuring requests caused by Settings.
+  await vi.waitFor(() => {
+    expect(h.accountRequests).toBe(1);
+    expect(snapshot().auth.stored).toBe(true);
+  });
+  expect(h.maximize).toHaveBeenCalledOnce();
+  expect(h.quit).not.toHaveBeenCalled();
 });
 afterAll(async () => {
   h.game?.finish(); for (const job of h.downloads) job.finish(130);
