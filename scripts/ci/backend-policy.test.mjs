@@ -524,3 +524,20 @@ test('installation estimates are public metadata only and never replace actual d
   assert.ok(storage.includes('fs.statfs(current, { bigint: true })'));
   assert.doesNotMatch(storage,/\.mkdir\(|\.writeFile\(|\.rm\(|\.unlink\(/);
 });
+
+test('chat JSON output remains strict and uses quiet equivalent policy selection without changing identity or sending', async () => {
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-social-stdout.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.ok(lock.patches.findIndex(value=>value.file===entry.file)>lock.patches.findIndex(value=>value.file==='xodus-social-session.patch'));
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/social_session.rs']);
+  const production=patch.split('chat_session_policy_lookup_keeps_stdout_machine_readable')[0];
+  for(const name of ['cache.get_endpoints()','endpoint.protocol.eq_ignore_ascii_case','host.eq_ignore_ascii_case',
+    'host.ends_with(endpoint.host.trim_start_matches','url.path() == path','max_by_key','endpoint.relying_party.clone()'])assert.ok(production.includes(name),name);
+  for(const name of ['chat_session_policy_lookup_keeps_stdout_machine_readable',
+    'chat_session_quiet_audience_matches_pinned_policy_selection_without_fallback'])assert.ok(patch.includes(name),name);
+  const added=production.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.doesNotMatch(added,/println!|\.post\(|\.send\(|\.save_|ensure_device_credentials|\.header\(|\.json\(/);
+  assert.ok((await fs.readFile('src/main/xbox-social.ts','utf8')).includes('JSON.parse(output)'));
+});
