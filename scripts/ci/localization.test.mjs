@@ -51,3 +51,8 @@ test('rejects missing or dynamically assembled UI keys', async () => {
   await fs.writeFile(path.join(source, 'screen.tsx'), "ui('unknown'); ui(variable);");
   await assert.rejects(checkUiKeys(en, source), /unknown interface key[\s\S]*static/);
 });
+test('rejects missing interpolation parameters and translated settings keys', async () => {
+  const source=path.join(root,'bad-parameters');await fs.mkdir(source);
+  await fs.writeFile(path.join(source,'screen.tsx'), "ui('hello.user', { wrong: 'Example' }); const value = { [ui('save')]: true };");
+  await assert.rejects(checkUiKeys(en,source), /missing interface parameters[\s\S]*protocol or settings key/);
+});

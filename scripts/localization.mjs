@@ -10,7 +10,7 @@ const directory = path.join(root, 'assets/locales');
 const rules = ts.transpileModule(await fs.readFile(path.join(root, 'src/shared/interface-language.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { canonicalLanguage, validateTranslationCatalog } = await import(`data:text/javascript;base64,${Buffer.from(rules).toString('base64')}`);
+const { canonicalLanguage, validateTranslationCatalog, translationPlaceholders } = await import(`data:text/javascript;base64,${Buffer.from(rules).toString('base64')}`);
 
 export function parseCatalog(source, english) {
   if (Buffer.byteLength(source) > 2 * 1024 * 1024) throw Error('Translation file is too large.');
@@ -86,6 +86,14 @@ export async function checkUiKeys(catalog, sourceRoot = path.join(root, 'src')) 
           const key = node.arguments[0];
           if (!key || !ts.isStringLiteral(key)) errors.push(`${file}: interface keys must be static`);
           else if (!catalog[key.text] && !catalog[key.text + '_other']) errors.push(`${file}: unknown interface key ${key.text}`);
+          else {
+            const expected=translationPlaceholders(catalog[key.text] ?? catalog[key.text+'_other']);
+            const values=node.arguments[1];
+            const provided=values && ts.isObjectLiteralExpression(values) ? values.properties.map(property=>property.name?.getText(syntax)) : [];
+            if (expected.some(name=>!provided.includes(name))) errors.push(`${file}: missing interface parameters for ${key.text}: ${expected.filter(name=>!provided.includes(name)).join(', ')}`);
+            const parent=node.parent;
+            if (ts.isComputedPropertyName(parent) || ts.isElementAccessExpression(parent) || ts.isBindingElement(parent) || ts.isBinaryExpression(parent) && ['===','!==','==','!='].includes(parent.operatorToken.getText(syntax))) errors.push(`${file}: translated text must not be used as a protocol or settings key`);
+          }
         }
         ts.forEachChild(node, visit);
       }
