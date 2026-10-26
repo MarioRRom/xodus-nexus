@@ -21,6 +21,7 @@ import { GameRemovalContents } from './GameRemovalContents';
 import { GameDetails } from './GameDetails';
 import { GameLanguage } from './GameLanguage';
 import { DownloadCancelDialog } from './DownloadCancelDialog';
+import { OfflinePermissionsCard } from './OfflinePermissions';
 import { KeyringSetup } from './KeyringSetup';
 import { DiagnosticReportButton } from './DiagnosticReport';
 import { Friends, preloadFriends } from './Friends';
@@ -105,9 +106,13 @@ export function TopStatus({ data, go, openFriends }: { data: AppSnapshot; go: (p
     nexusRuntimeUpdateAvailable(data.runtime) ? ui('home.runtime_update', { version: data.runtime.nexusVersion?.replace(/^runtime-/, '') ?? '' }).trim() : '',
   ].filter(Boolean);
   const updateTitle = [restart ? ui('home.restart_update') : '', updates.length ? ui('home.available_updates', { updates: updates.join(', ') }) : ''].filter(Boolean).join(' ');
+  const offline = data.backend.available && data.connectivity?.state === 'offline';
   return <div className="top-status">
     {updates.length || restart ? <button className="update-notice" title={updateTitle} aria-label={updateTitle} onClick={() => go('settings')}><ArrowDownToLine /><strong>{restart ? ui("ui.restart_available_cad1527") : ui("ui.update_available_ff8b555")}</strong></button> : null}
-    <StatusDot tone={data.backend.available ? 'green' : 'red'} /><span>{data.backend.available ? ui("ui.xodus_ready_b131015") : ui("ui.backend_offline_5904a63")}</span><button title={ui("ui.settings_74a883a")} onClick={() => go('settings')}><Settings2 /></button>
+    <StatusDot tone={!data.backend.available ? 'red' : offline ? 'amber' : 'green'} />
+    <span title={offline ? `${uiText(data.connectivity?.reason) ?? ui('offline.unreachable')} ${ui('offline.header_hint')}` : undefined}>
+      {!data.backend.available ? ui("ui.backend_offline_5904a63") : offline ? ui('offline.header') : ui("ui.xodus_ready_b131015")}
+    </span><button title={ui("ui.settings_74a883a")} onClick={() => go('settings')}><Settings2 /></button>
   </div>;
 }
 
@@ -909,6 +914,8 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
       <div className="button-row"><button className="primary" disabled={!caps.login || data.auth.running} onClick={() => invoke('login', () => window.launcher.login(), ui("ui.xodus_sign_in_completed_8240737"))}>{data.auth.running ? <LoaderCircle className="spin" /> : <LogIn />}{data.auth.stored ? ui("ui.sign_in_again_51fbe1d") : ui("ui.sign_in_with_xodus_252572f")}</button><button className="secondary" disabled={!caps.logout || data.auth.running || data.auth.stored === false} title={ui("ui.remove_saved_sign_in_credentials_and_local_devic_6485324")} onClick={() => invoke('logout', () => window.launcher.logout(), ui("ui.saved_sign_in_credentials_and_local_device_regis_c9738bd"))}>{ui("ui.sign_out_48f0d3d")}</button><button className="secondary" disabled={!caps.account || data.auth.running} onClick={() => invoke('account', () => window.launcher.refreshAccount())}><RefreshCw />{ui("ui.refresh_status_442c4b8")}</button></div>
       <PasskeySignInNotice />
     </section>
+
+    {caps.offlinePc ? <OfflinePermissionsCard key={`${data.auth.username}:${data.auth.stored}`} toast={toast} signedIn={data.auth.stored === true} /> : null}
 
     <section className="settings-card">
       <div className="settings-heading"><div className="settings-icon"><Terminal /></div><div><h2>{ui("ui.xodus_backend_a99abd3")}</h2><p>{data.backend.version ? ui("ui.nexus_backend_909289e", { version: data.backend.version }) : data.backend.available ? ui("ui.backend_cli_02229de", { version: data.backend.capabilities.version ?? ui('settings.unknown_version') }) : ui("ui.install_the_prebuilt_nexus_backend_bd247cd")}</p></div><span className={`status-label ${data.backend.available ? 'ready' : 'off'}`}><StatusDot tone={data.backend.available ? 'green' : 'red'} />{data.backend.available ? ui("ui.validated_3dac322") : ui("ui.offline_5c3ce8d")}</span></div>

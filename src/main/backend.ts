@@ -78,6 +78,15 @@ export class BackendManager {
           capabilities.contentPackageSelection = help.code === 0 && /(?:^|\s)--include-dlc(?:\s|$)/m.test(help.output);
         }
       }
+      if (capabilities.run) {
+        const launch = await run(binaryPath, ['run', '--help'], { maxOutput: 100_000 });
+        const designation = capabilities.offlinePc ? await run(binaryPath, ['offline-pc', '--help'], { maxOutput: 100_000 }) : undefined;
+        // Only a backend that also revokes stored licenses when Microsoft reports
+        // the device as undesignated may keep them.
+        capabilities.licenseCache = launch.code === 0 && /(?:^|\s)--license-cache(?:\s|$)/m.test(launch.output)
+          && designation?.code === 0 && /(?:^|\s)--license-cache(?:\s|$)/m.test(designation.output);
+        capabilities.offlineLaunch = Boolean(capabilities.licenseCache && /(?:^|\s)--offline(?:\s|$)/m.test(launch.output));
+      }
       return capabilities.login && capabilities.streaming ? capabilities : null;
     } catch (error) { if (error instanceof BackendPrerequisiteError) throw error; return null; }
   }

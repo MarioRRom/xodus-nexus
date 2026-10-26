@@ -22,6 +22,7 @@ function fixture(code = 0) {
     shutdownStarted: false, accountProfile: { select: vi.fn(async () => {}) },
     startAuthTransport: vi.fn(() => tracked), spawnTracked: vi.fn(() => tracked),
     emitLog: vi.fn(), operations: new Map(), refreshAccount: vi.fn(async () => {}), authJob: undefined,
+    revokeOffline: vi.fn(async () => {}),
   });
   runInContext(actions, context);
   return context;
@@ -40,6 +41,8 @@ describe('explicit account actions', () => {
     expect(context.gameActivities.select).toHaveBeenCalledOnce();
     expect(context.gameAchievements.select).toHaveBeenCalledOnce();
     expect(context.refreshAccount).toHaveBeenCalledWith(false, true);
+    expect(context.revokeOffline).toHaveBeenCalledOnce(); expect(context.revokeOffline).toHaveBeenCalledWith('sign-out');
+    expect(context.revokeOffline.mock.invocationCallOrder[0]).toBeLessThan(context.refreshAccount.mock.invocationCallOrder[0]);
     expect(context.authState).toMatchObject({ running: false, lastAction: 'logout', lastResult: 'success' });
     expect(context.operations.size).toBe(0);
     expect(context.authJob).toBeUndefined();
@@ -50,6 +53,8 @@ describe('explicit account actions', () => {
     expect(context.spawnTracked).toHaveBeenCalledOnce();
     expect(context.spawnTracked).toHaveBeenCalledWith('/synthetic/backend', ['logout', '--device'], expect.any(Object));
     expect(context.refreshAccount).not.toHaveBeenCalled();
+    // A failed device reset still drops offline licenses: the user asked to sign out.
+    expect(context.revokeOffline).toHaveBeenCalledOnce(); expect(context.revokeOffline).toHaveBeenCalledWith('sign-out');
     expect(context.authState).toMatchObject({ running: false, lastResult: 'failed' });
     expect(context.operations.size).toBe(0);
     expect(context.authJob).toBeUndefined();
@@ -62,6 +67,7 @@ describe('explicit account actions', () => {
     expect(context.xboxSocial.close).toHaveBeenCalledOnce();
     expect(context.startAuthTransport).toHaveBeenCalledWith('/synthetic/backend', expect.any(Object));
     expect(context.spawnTracked).not.toHaveBeenCalled();
+    expect(context.revokeOffline).not.toHaveBeenCalled();
     expect(context.authState).toMatchObject({ running: false, lastAction: 'login', lastResult: 'success' });
   });
   it('rejects sign-out while another operation requires credentials', async () => {

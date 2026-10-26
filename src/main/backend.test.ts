@@ -14,10 +14,13 @@ vi.mock('./process.js', async importOriginal => {
     if (cmd.endsWith('/xodus-cli')) {
       const marker = (await fs.readFile(cmd))[63];
       if (marker === 7) return {code:127,output:'/private/path/xodus-cli: error while loading shared libraries: libdbus-1.so.3: cannot open shared object file: No such file or directory\n'};
+      // 8: an earlier offline backend that cannot revoke stored licenses; 9: the current one.
+      if ([8, 9].includes(marker) && args[0] === 'run') return { code: 0, output: '--materialize-chain\n--license-cache <LICENSE_CACHE>\n--offline\n' };
+      if ([8, 9].includes(marker) && args[0] === 'offline-pc') return { code: 0, output: marker === 9 ? '--set <SET>\n--confirm\n--license-cache <LICENSE_CACHE>\n' : '--set <SET>\n--confirm\n' };
       if (args[0] === 'resolve-package') return { code:0,output: marker === 6 ? '--include-dlc\n' : '--json\n--market\n' };
       return { code: 0, output: args[0] === 'streaming' ? '--selected-content-id\n' + ([3,5].includes(marker) ? '--progress-json\n--control-stdin\n' : '') + (marker === 3 ? '--download-limit-kib\n' : '') : args[0] === 'run' ? (marker === 2 ? '--unsupported' : '--materialize-chain') :
         (marker === 1 ? 'xodus-cli 0.1.0\n  login    Login\n  streaming    Streaming\n' :
-        'xodus-cli 0.1.0\n  account    Account\n  login    Login\n  logout    Logout\n  download    Download\n  streaming    Streaming\n  run    Run\n  resolve-package    Resolve packages\n' + (marker === 4 ? '' : '\nOptions:\n  --external-webview-stdio  External UI\n')) };
+        'xodus-cli 0.1.0\n  account    Account\n  login    Login\n  logout    Logout\n  download    Download\n  streaming    Streaming\n  run    Run\n  resolve-package    Resolve packages\n' + ([8, 9].includes(marker) ? '  offline-pc    Offline PC\n' : '') + (marker === 4 ? '' : '\nOptions:\n  --external-webview-stdio  External UI\n')) };
     }
     if (cmd.endsWith('/xodus-service')) throw new Error('Service must never be started by installer tests');
     if (['git', 'cargo', 'rustc', 'protoc'].includes(cmd)) return { code: 1, output: 'Build tool intentionally absent' };
@@ -69,6 +72,16 @@ describe('prebuilt backend', () => {
       const status=await new BackendManager(root,root,()=>{},()=>false).refresh();
       expect(status.capabilities.contentPackageSelection).toBe(supported);
       expect(status.capabilities.packageSelection).toBe(true);
+    }finally{await fs.rm(root,{recursive:true,force:true});}
+  });
+  it.each([[8, false], [9, true]])('keeps offline licenses only with a backend that also revokes them (marker %s)', async (marker, supported) => {
+    const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-license-cache-cap-'));
+    try{const cli=path.join(root,'target/release/xodus-cli');await fs.mkdir(path.dirname(cli),{recursive:true});
+      const bytes=elf();bytes[63]=marker;await fs.writeFile(cli,bytes,{mode:0o755});
+      const status=await new BackendManager(root,root,()=>{},()=>false).refresh();
+      expect(status.capabilities.offlinePc).toBe(true);
+      expect(status.capabilities.licenseCache).toBe(supported);
+      expect(status.capabilities.offlineLaunch).toBe(supported);
     }finally{await fs.rm(root,{recursive:true,force:true});}
   });
   it.each([false, true])('detects structured progress and controls from actual subcommand help: %s', async supported => {

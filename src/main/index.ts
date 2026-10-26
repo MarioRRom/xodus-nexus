@@ -1,11 +1,11 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, net, Notification, powerSaveBlocker, screen, shell } from 'electron';
 import { constants, createWriteStream, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AppSnapshot, AuthStatus, DownloadTask, Game, GameLaunchOptions, GameOperation, GameUpdate, InstallRequest, Settings } from '../shared/types.js';
+import type { AppSnapshot, AuthStatus, ConnectivityStatus, DownloadTask, Game, OfflinePermissions, GameLaunchOptions, GameOperation, GameUpdate, InstallRequest, Settings } from '../shared/types.js';
 import { downloadFailure, safeProductId } from '../shared/utils.js';
 import { contentLicenseFailure } from '../shared/content-license.js';
 import { interfaceLanguagePreference } from '../shared/interface-language.js';
@@ -20,6 +20,8 @@ import { run, spawnTracked } from './process.js';
 import { inspectGameDirectory, StateStore } from './store.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
+import { accountCacheKey } from './offline-identity.js';
+import { applyOfflinePermissions, bindOfflineAccess, licenseCacheDirectory, revokeOfflineAccess, type OfflineRevocation } from './offline-access.js';
 import { CatalogService } from './catalog.js';
 import { cloudSaveRuntime, gameInviteRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
@@ -30,6 +32,7 @@ import { spawnGameProcess, type GameProcess } from './game-process.js';
 import { gameLocaleEnvironment, installedGameLocales, installedGameTitleId, supportedGameLocale } from './game-locale.js';
 import { antiCheatEnvironment } from './anti-cheat.js';
 import { gameLaunchArguments, preparedGameWine } from './game-launch.js';
+import { ConnectivityMonitor } from './connectivity.js';
 import { prepareGameWrapper, type GameWrapper } from './game-wrapper.js';
 import { normalizeLaunchTools } from '../shared/launch-tools.js';
 import { LauncherUpdater } from './launcher-update.js';
@@ -51,6 +54,7 @@ import { RecentPcGamePass } from './gamepass-recent.js';
 import { GameActivities, installedTitleId } from './game-activity.js';
 import { GameAchievementsReader } from './game-achievements.js';
 import { GameContent, type ContentPackage } from './game-content.js';
+import { backendRunner, changeOfflinePermissions, readOfflinePermissions } from './offline-permissions.js';
 import { startAuthTransport } from './auth-transport.js';
 import { authViewFactory } from './auth-window.js';
 import { browserAuthViewFactory } from './auth-browser.js';
@@ -93,6 +97,7 @@ let store: StateStore;
 let backend: BackendManager;
 let backendDiagnostics: BackendDiagnostics;
 let runtime: RuntimeManager;
+let connectivity: ConnectivityMonitor | undefined;
 const operations = new Map<string, ChildProcessWithoutNullStreams>();
 const gameProcesses = new Map<string, GameProcess>();
 const cancelledDownloads = new Set<string>();
@@ -222,6 +227,7 @@ function snapshot(): AppSnapshot {
   return {
     backend: backend.current,
     runtime: runtime.current,
+    connectivity: connectivity?.current ?? { state: 'unknown' },
     games: structuredClone(store.games),
     downloads: structuredClone(store.downloads.map(task => downloadCancellations.has(task.id)
       ? { ...task, cancelling: true, canPause: false, phase: 'Cancelling download and checking files…' } : task)),
@@ -437,6 +443,39 @@ async function prepareSystemWallet(): Promise<void> {
   if (directShortcut) mainWindow?.hide();
 }
 
+function offlineDataRoot(): string { return path.dirname(store.settings.runtimeRoot); }
+async function revokeOffline(reason: OfflineRevocation): Promise<void> {
+  await revokeOfflineAccess(offlineDataRoot());
+  emitLog('offline', `Removed stored offline licenses and identities (${reason}).`);
+}
+/** The backend removes its stored licenses itself when Microsoft reports this
+ * device as not designated; the runtime identities are removed here. */
+async function settleOfflinePermissions(status: OfflinePermissions, changed: boolean): Promise<OfflinePermissions> {
+  if (changed) await revokeOffline('designation-changed');
+  else if (await applyOfflinePermissions(offlineDataRoot(), status)) emitLog('offline', 'Removed stored offline licenses and identities (designation-off).');
+  return status;
+}
+function offlineLicenseCache(): string | undefined {
+  return backend.current.capabilities.licenseCache ? licenseCacheDirectory(offlineDataRoot()) : undefined;
+}
+let designationCheck: Promise<void> | undefined;
+/** Back online: ask Microsoft whether this device is still the offline PC, so a
+ * designation moved elsewhere while it was offline ends offline play here at
+ * once instead of at the next launch. Reading costs no yearly change. */
+function verifyOfflineDesignation(): void {
+  if (designationCheck || shutdownStarted || authState.running || authState.stored !== true) return;
+  const status = backend.current;
+  if (!status.available || !status.binaryPath || !status.capabilities.offlinePc) return;
+  const binary = status.binaryPath;
+  designationCheck = (async () => {
+    // Never open the wallet prompt from a background check.
+    const keyring = await keyringSupport.check();
+    if (keyring.gameMode && keyring.state !== 'ready') return;
+    await settleOfflinePermissions(await readOfflinePermissions(backendRunner(binary), offlineLicenseCache()), false);
+  })().catch(() => { /* Unanswered checks change nothing; the next launch or reconnect asks again. */ })
+    .finally(() => { designationCheck = undefined; });
+}
+
 async function runAuth(command: 'login' | 'logout'): Promise<void> {
   ensureIdle();
   const binary = requireBackend(command);
@@ -464,6 +503,8 @@ async function runAuth(command: 'login' | 'logout'): Promise<void> {
     operations.set(id, tracked.child);
     const result = await tracked.result;
     accountRefresh.invalidate();
+    // Another account signing in is caught before its first launch (bindOfflineAccess).
+    if (command === 'logout') await revokeOffline('sign-out');
     if (result.code === 0) await refreshAccount(false, true);
     authState = {
       ...authState,
@@ -881,9 +922,19 @@ async function prepareGameLaunch(id: string): Promise<void> {
   if (await unbridgedCloudSaveRuntime(wine)) {
     throw new Error('The active runtime has cloud saves without the required service bridge. Update the active runtime in Settings.');
   }
-  const args = gameLaunchArguments(inspected, wine, store.settings.market, backend.current.linuxRunPatch);
-  const operationId = `game-${id}`;
   const dataRoot = path.dirname(store.settings.runtimeRoot);
+  // Decide "offline" here, once, from a fresh probe: the backend then skips
+  // its ticket, license and PlayFab requests and the runtime signs in from
+  // its cached identity, instead of each waiting for its own connect timeout.
+  const reachability: ConnectivityStatus = connectivity ? await connectivity.check() : { state: 'unknown' };
+  const offlineLaunch = reachability.state === 'offline';
+  if (authState.stored === true && authState.username && await bindOfflineAccess(dataRoot, authState.username)) {
+    emitLog('offline', 'Removed stored offline licenses and identities (account-changed).');
+  }
+  const licenseCache = offlineLicenseCache();
+  const args = gameLaunchArguments(inspected, wine, store.settings.market, backend.current.linuxRunPatch,
+    licenseCache, offlineLaunch && Boolean(licenseCache && backend.current.capabilities.offlineLaunch));
+  const operationId = `game-${id}`;
   const logDirectory = path.join(dataRoot, 'logs');
   const logPath = path.join(logDirectory, `${id}-latest.log`);
   await fs.mkdir(logDirectory, { recursive: true });
@@ -916,6 +967,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
   writeLaunchLog(`Mode: package manifest; cloud saves: ${cloudRuntime ? 'enabled' : 'not available in active runtime'}; verbose logs: ${verboseLogs ? 'on' : 'off'}`);
   writeLaunchLog(`Backend: ${binary}`);
   writeLaunchLog(`Wine: ${wine}`);
+  writeLaunchLog(`Connectivity: ${reachability.state}${reachability.reason ? ` (${reachability.reason})` : ''}; offline launch: ${offlineLaunch ? 'yes' : 'no'}`);
   emitSnapshot();
   let serviceSession: XodusServiceSession | undefined;
   let inviteBridge: GameInviteBridge | undefined;
@@ -959,6 +1011,14 @@ async function prepareGameLaunch(id: string): Promise<void> {
       return [] as string[];
     });
     if (contentRoots.length) environment.XODUS_CONTENT_ROOTS = [environment.XODUS_CONTENT_ROOTS, ...contentRoots.map(root => 'Z:' + root.replaceAll('/', '\\'))].filter(Boolean).join(';');
+    if (offlineLaunch) {
+      // The runtime treats the network as unreachable at once instead of
+      // waiting for its own connect timeouts. Whether it may sign in from its
+      // cached identity is the backend's decision, made only after the stored
+      // license passed its lease checks.
+      environment.XODUS_FORCE_OFFLINE = '1';
+      addGameLog(`Microsoft is unreachable (${reachability.reason ?? 'no answer'}); launching offline with the stored license.`);
+    }
     if (locale) {
       addGameLog(`Selected game language: ${locale}.`);
     }
@@ -985,6 +1045,8 @@ async function prepareGameLaunch(id: string): Promise<void> {
         environment.NEXUS_INVITE_PORT=String(inviteBridge.port);environment.NEXUS_INVITE_KEY=inviteBridge.key;
       }catch{await inviteBridge.stop().catch(()=>{});inviteBridge=undefined;addGameLog('Optional game invitations are unavailable for this launch.');}
     }
+    // Names the account for the runtime's offline identity cache (an opaque key, never the username).
+    if (authState.stored === true && authState.username) environment.XODUS_ACCOUNT_HASH = accountCacheKey(authState.username);
     if (protonRunner) addGameLog(`Proton prefix: ${protonRunner.compatibilityDataPath}/pfx`);
     else await fs.mkdir(legacyPrefixRoot, { recursive: true });
     const tracked = await spawnGameProcess(binary, args, {
@@ -1229,6 +1291,8 @@ function registerDemoIpc(catalogMarket: () => string): void {
   ipcMain.handle('save-diagnostic-report', (_event, content: unknown) => saveReviewedReport(content));
   ipcMain.handle('login', () => {});
   ipcMain.handle('logout', () => {});
+  ipcMain.handle('offline-permissions', () => ({ enabled: false, requestSuccess: true, remainingToggles: 2, maxToggles: 3, periodDays: 365, checkedAt: new Date().toISOString() }));
+  ipcMain.handle('set-offline-permissions', (_event, enabled: boolean) => ({ enabled: Boolean(enabled), requestSuccess: true, remainingToggles: 1, maxToggles: 3, periodDays: 365, checkedAt: new Date().toISOString() }));
   ipcMain.handle('catalog-search', (_event, query: string, cursor?: string) => catalog.search(query, catalogMarket(), cursor));
   ipcMain.handle('catalog-featured', () => catalog.featured(catalogMarket()));
   ipcMain.handle('account-library', (_event, kind: 'all' | 'owned' | 'gamepass') => demoAccountLibrary(kind, demoArtwork));
@@ -1369,6 +1433,23 @@ function registerIpc(): void {
   });
   ipcMain.handle('login', () => requestAuth('login'));
   ipcMain.handle('logout', () => requestAuth('logout'));
+  ipcMain.handle('offline-permissions', async () => {
+    const binary = requireBackend('offlinePc');
+    await prepareSystemWallet();
+    return settleOfflinePermissions(await readOfflinePermissions(backendRunner(binary), offlineLicenseCache()), false);
+  });
+  ipcMain.handle('set-offline-permissions', async (_event, enabled: unknown) => {
+    // The renderer confirms with the user first; Microsoft counts every change against a yearly limit.
+    if (typeof enabled !== 'boolean') throw Error('Invalid offline-permission request.');
+    ensureIdle();
+    const binary = requireBackend('offlinePc');
+    await prepareSystemWallet();
+    const result = await changeOfflinePermissions(backendRunner(binary), enabled, offlineLicenseCache());
+    accountRefresh.invalidate();
+    // Either direction starts over, as in the Xbox app: licenses stored before
+    // the change are never used again and each game needs one online launch.
+    return settleOfflinePermissions(result, true);
+  });
   ipcMain.handle('catalog-search', (_event, query: string, cursor?: string) => {
     return catalog.search(query, catalogMarket(), cursor);
   });
@@ -1912,6 +1993,17 @@ app.whenReady().then(async () => {
   backend = new BackendManager(app.getPath('userData'), store.settings.externalXodusRoot, emitLog, () => keyringSupport.busy || downloadCancellations.size > 0 || operations.size > 0 || installQueue.size > 0 || preparingInstall || runtime?.current.updating === true);
   await backend.refresh();
   await runtime.refresh();
+  if (!demoMode) {
+    // Reachability of Microsoft's sign-in hosts, kept current for the header
+    // and consulted before a launch so offline play starts without waiting
+    // for the backend's and the runtime's own connect timeouts. Each return
+    // to online re-checks the offline designation.
+    connectivity = new ConnectivityMonitor({ interfaceOnline: () => net.isOnline(), onChange: () => {
+      scheduleSnapshot();
+      if (connectivity?.current.state === 'online') verifyOfflineDesignation();
+    } });
+    connectivity.start();
+  }
   void prepareFirstRunBackend().catch(() => emitSnapshot());
   void runtime.checkNexus().then(() => emitSnapshot(), () => { /* Nexus runtime is optional. */ });
   await syncManagedWinePath();
@@ -1945,6 +2037,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {gameDisplay.stop();});
 
 app.on('before-quit', (event) => {
+  connectivity?.stop();
   xboxSocial.close();
   walletUnlocker.cancel();
   installQueue.stop();

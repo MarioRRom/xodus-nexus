@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Play installed games offline on the account's designated offline device, as the Xbox app allows: a game launched once while online keeps Microsoft's offline lease, and the stored license is checked against that lease again at every offline launch. **Settings → Offline permissions** shows and changes the designation.
+- Remove stored offline licenses and offline sign-ins whenever offline play ends: turning it off, Microsoft reporting another device as the offline device, another account, sign-out, or a licensing refusal.
 - Preserve Microsoft broker headers on both hosted sign-in steps. Thanks @Wyze3306 for the upstream fix adapted here.
 - Accept compact JWE tickets when requesting game content licenses without changing Xbox or Store sign-in token handling.
 - Show owned games with unsupported packages in My Library with the existing Unsupported badge and installation disabled.

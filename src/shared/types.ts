@@ -13,6 +13,14 @@ export interface BackendCapabilities {
   download: boolean;
   streaming: boolean;
   streamingProgressJson?: boolean;
+  /** `run --license-cache` and `offline-pc --license-cache`: device-bound offline
+   * licenses that the backend validates against their lease on every load and
+   * removes on every known revocation. Older caches are never handed a path. */
+  licenseCache?: boolean;
+  /** `offline-pc`: show or change the account's designated offline PC. */
+  offlinePc?: boolean;
+  /** `run --offline`: skip Microsoft entirely and launch on the stored offline license. */
+  offlineLaunch?: boolean;
   streamingControls?: boolean;
   streamingBandwidthLimit?: boolean;
   packageSelection?: boolean;
@@ -218,10 +226,32 @@ export interface KeyringStatus {
   message: string;
 }
 
+/** The Xbox app's "Offline permissions" setting for this device, as Microsoft reports it. */
+export interface OfflinePermissions {
+  enabled: boolean;
+  /** For a change: whether Microsoft applied it. */
+  requestSuccess: boolean;
+  remainingToggles?: number;
+  maxToggles?: number;
+  periodDays?: number;
+  /** When the next change becomes possible once none remain. */
+  nextChangeAt?: string;
+  checkedAt: string;
+}
+
+/** Reachability of Microsoft's sign-in hosts, probed by the launcher. */
+export interface ConnectivityStatus {
+  state: 'online' | 'offline' | 'unknown';
+  checkedAt?: string;
+  /** Why the launcher considers Microsoft unreachable. */
+  reason?: string;
+}
+
 export interface AppSnapshot {
   social?: import('./game-invites.js').GameInviteState;
   backend: BackendStatus;
   runtime: RuntimeStatus;
+  connectivity?: ConnectivityStatus;
   games: Game[];
   downloads: DownloadTask[];
   settings: Settings;
@@ -399,6 +429,8 @@ export interface LauncherApi {
   saveDiagnosticReport(content: string): Promise<boolean>;
   login(): Promise<void>;
   logout(): Promise<void>;
+  offlinePermissions(): Promise<OfflinePermissions>;
+  setOfflinePermissions(enabled: boolean): Promise<OfflinePermissions>;
   searchCatalog(query: string, cursor?: string): Promise<CatalogSearchResult>;
   getFeaturedCatalog(): Promise<CatalogSearchResult>;
   getAccountLibrary(kind: AccountLibraryPage['kind'], cursor?: string, refresh?: boolean, sort?: AccountLibraryPage['sort']): Promise<AccountLibraryPage>;
