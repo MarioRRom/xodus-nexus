@@ -199,7 +199,12 @@ beforeAll(async () => {
   });
   await import('./index.js');
   await vi.waitFor(() => expect(h.handlers.has('start-install')).toBe(true));
-  await new Promise(resolve=>setImmediate(resolve));
+  // The window deliberately precedes the asynchronous startup account check.
+  // Establish its completion before measuring requests caused by Settings.
+  await vi.waitFor(() => {
+    expect(h.accountRequests).toBe(1);
+    expect(snapshot().auth.stored).toBe(true);
+  });
   expect(h.maximize).toHaveBeenCalledOnce();
   expect(h.quit).not.toHaveBeenCalled();
 });
