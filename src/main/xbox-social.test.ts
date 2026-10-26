@@ -33,6 +33,66 @@ describe('explicit account-bound Xbox friends/chat',()=>{
     await social.conversation('42');await social.conversation('42');expect(read).toHaveBeenCalledOnce();
     await expect(social.send('42','hello')).rejects.toThrow();await social.conversation('42');expect(read).toHaveBeenCalledTimes(3);
   });
+  it.each([false,true])('does not cache an older read that completes during a send (failed=%s)',async failed=>{
+    const pending:{request:SocialRequest;resolve:(value:string)=>void;reject:(error:Error)=>void}[]=[];
+    const read=vi.fn((_binary:string,request:SocialRequest)=>new Promise<string>((resolve,reject)=>pending.push({request,resolve,reject})));
+    const social=new XboxSocial(()=>identity,read),empty={xuid:'42',messages:[],hasMore:false};
+    const old=social.conversation('42'),sent=social.send('42','hello');
+    const sendResult=failed?expect(sent).rejects.toThrow():expect(sent).resolves.toEqual({messageId:'receipt'});
+    pending[0].resolve(output(empty));await old;
+    if(failed)pending[1].reject(Error('synthetic ambiguous send'));else pending[1].resolve(output({sent:true,messageId:'receipt'}));
+    await sendResult;
+    const fresh=social.conversation('42');
+    expect(read).toHaveBeenCalledTimes(3);
+    pending[2].resolve(output(empty));await fresh;await social.settled();
+    expect(pending.filter(job=>job.request.op==='send')).toHaveLength(1);
+  });
+  it('waits out invalidated pre-send reads instead of coalescing post-send reconciliation with them',async()=>{
+    const pending:{request:SocialRequest;resolve:(value:string)=>void}[]=[];
+    const read=vi.fn((_binary:string,request:SocialRequest)=>new Promise<string>(resolve=>pending.push({request,resolve})));
+    const social=new XboxSocial(()=>identity,read),empty={xuid:'42',messages:[],hasMore:false};
+    const old=social.conversation('42'),sent=social.send('42','hello');
+    pending[1].resolve(output({sent:true,messageId:'receipt'}));await sent;
+    const fresh=social.conversation('42');expect(fresh).not.toBe(old);expect(read).toHaveBeenCalledTimes(2);
+    pending[0].resolve(output(empty));await old;await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(3);
+    pending[2].resolve(output({...empty,messages:[{id:'receipt',sender:'43',at:'2026-10-26T00:00:00Z',text:'hello',hidden:false}]}));
+    expect((await fresh).messages[0].id).toBe('receipt');await social.settled();
+    expect(pending.filter(job=>job.request.op==='send')).toHaveLength(1);
+  });
+  it('does not start a deferred post-send read after its surface closes',async()=>{
+    const pending:{request:SocialRequest;resolve:(value:string)=>void}[]=[];
+    const read=vi.fn((_binary:string,request:SocialRequest)=>new Promise<string>(resolve=>pending.push({request,resolve})));
+    const social=new XboxSocial(()=>identity,read),empty={xuid:'42',messages:[],hasMore:false};
+    const old=social.conversation('42'),oldResult=expect(old).rejects.toThrow('cancelled'),sent=social.send('42','hello');
+    pending[1].resolve(output({sent:true,messageId:'receipt'}));await sent;
+    const fresh=social.conversation('42'),freshResult=expect(fresh).rejects.toThrow();social.close();
+    pending[0].resolve(output(empty));await oldResult;await freshResult;await social.settled();
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+  it('invalidates reads started while a send is in flight, without evicting the friends cache',async()=>{
+    const pending:{request:SocialRequest;resolve:(value:string)=>void}[]=[];
+    const read=vi.fn((_binary:string,request:SocialRequest)=>new Promise<string>(resolve=>pending.push({request,resolve})));
+    const social=new XboxSocial(()=>identity,read),empty={xuid:'42',messages:[],hasMore:false};
+    const friends=social.friends();pending[0].resolve(output({friends:[friend]}));await friends;
+    const sent=social.send('42','hello'),old=social.conversation('42');
+    pending[1].resolve(output({sent:true,messageId:'receipt'}));await sent;
+    const fresh=social.conversation('42');pending[2].resolve(output(empty));await old;await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(4);pending[3].resolve(output(empty));await fresh;
+    expect((await social.friends())[0].xuid).toBe('42');expect(read).toHaveBeenCalledTimes(4);await social.settled();
+  });
+  it('does not restart a deferred old-account read after the signed-in account changes',async()=>{
+    let current=identity;
+    const pending:{request:SocialRequest;resolve:(value:string)=>void}[]=[];
+    const read=vi.fn((_binary:string,request:SocialRequest)=>new Promise<string>(resolve=>pending.push({request,resolve})));
+    const social=new XboxSocial(()=>current,read),empty={xuid:'42',messages:[],hasMore:false};
+    const old=social.conversation('42'),sent=social.send('42','hello');
+    pending[1].resolve(output({sent:true,messageId:'receipt'}));await sent;
+    const fresh=social.conversation('42'),freshResult=expect(fresh).rejects.toThrow('changed');
+    const oldResult=expect(old).rejects.toThrow('changed');current={...identity,account:'different-account'};
+    pending[0].resolve(output(empty));await oldResult;await freshResult;await social.settled();
+    expect(read).toHaveBeenCalledTimes(2);
+  });
   it('does not call anything at construction or without a supported signed-in account',async()=>{
     const read=vi.fn();const social=new XboxSocial(()=>undefined,read);expect(read).not.toHaveBeenCalled();
     await expect(social.friends()).rejects.toThrow('Sign in');expect(read).not.toHaveBeenCalled();
@@ -61,6 +121,13 @@ describe('explicit account-bound Xbox friends/chat',()=>{
   it('never exposes arbitrary transport errors or retries an ambiguous send',async()=>{
     const read=vi.fn(async()=>{throw Error('Invalid Xbox response. PRIVATE_TOKEN');});const social=new XboxSocial(()=>identity,read);
     await expect(social.send('42','hello')).rejects.toThrow('unavailable');expect(read).toHaveBeenCalledOnce();
+  });
+  it('does not salvage a receipt from diagnostic-prefixed stdout or fabricate send confirmation',async()=>{
+    const diagnostic='Identified Title endpoint=SYNTHETIC for URL=https://fixture.invalid/';
+    const read=vi.fn(async()=>diagnostic+'\n'+output({sent:true,messageId:'receipt'}));
+    const social=new XboxSocial(()=>identity,read);
+    await expect(social.send('42','hello')).rejects.toThrow('Invalid Xbox response.');
+    expect(read).toHaveBeenCalledOnce();await social.settled();
   });
   it('does not treat an old boolean acknowledgement as confirmed history or retry it',async()=>{
     const read=vi.fn(async()=>output({sent:true})),social=new XboxSocial(()=>identity,read);

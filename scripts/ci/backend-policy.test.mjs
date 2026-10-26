@@ -479,3 +479,32 @@ test('Store device-limit guidance is a bounded response-only change with the off
     assert.ok(patch.includes(text), text);
   assert.doesNotMatch(patch, /^[+-].*(?:\.send\(|\.post\(|Authorization|\.save_|\.remove_|ensure_device|init_secrets)/m);
 });
+
+test('outgoing chat reuses the current login identity with server-issued context and exact request signatures',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-social-session.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.ok(lock.patches.findIndex(value=>value.file===entry.file)>lock.patches.findIndex(value=>value.file==='xodus-social-send-receipt.patch'));
+  const sections=patch.split(/(?=^diff --git )/m).filter(Boolean);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]).sort(),[
+    'crates/xodus-cli/src/commands/login.rs','crates/xodus-cli/src/commands/social.rs','crates/xodus-cli/src/commands/social_session.rs',
+  ]);
+  const login=sections.find(value=>value.includes(' b/crates/xodus-cli/src/commands/login.rs\n'));
+  const changes=login.split('\n').filter(value=>/^[+-]/.test(value)&&!/^\+\+\+|^---/.test(value));
+  assert.equal(changes.length,2);assert.equal(changes[1].replace('+pub(super) ','-'),changes[0]);
+  const session=sections.find(value=>value.includes(' b/crates/xodus-cli/src/commands/social_session.rs\n'));
+  const production=session.split('+#[cfg(test)]')[0];
+  for(const name of ['chat_session_signature_preserves_exact_bytes_and_rejects_tampering',
+    'chat_session_issued_tickets_keep_the_server_type_and_require_fresh_lifetimes',
+    'chat_session_xsts_requires_one_real_user_communications_and_unexpired_token',
+    'chat_session_writes_require_atomic_identity_and_reject_same_name_different_principal',
+    'chat_session_post_is_signed_once_without_retries_redirects_or_error_payloads'])assert.ok(session.includes(name),name);
+  for(const value of ['super::super::login::CLIENT_ID','get_user_sts_session()',
+    'find_relying_party_for_url(super::MESSAGES)','signer.sign_request(legacy, None)',
+    'signer.verify(signed)','"ProofKey":signer.get_proof_key()',
+    '"TitleToken":title_token','"DeviceToken":device_token','"UserTokens":[user_token]',
+    '"CommunicateUsingText"','value["isAllowed"] != true','super::payload(&op, &value)?'])assert.ok(production.includes(value),value);
+  assert.doesNotMatch(production,/\.save_|ensure_device_credentials|start_new_session|do_sisu\(|danger_accept|readHorizon|mark.read|\.delete\(|\/tmp\/|NEXUS_CHAT_(?:DIAG|BOUND)/i);
+  assert.ok(sections.find(value=>value.includes(' b/crates/xodus-cli/src/commands/social.rs\n')).includes('chat_session::send(tokens, peer, message)'));
+});

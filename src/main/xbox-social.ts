@@ -53,11 +53,12 @@ async function command(binary: string, request: SocialRequest, signal: AbortSign
 export class XboxSocial {
   private jobs=new Map<string,{controller:AbortController;result:Promise<unknown>}>();
   private reads=new Map<string,{expires:number;value:unknown}>();
+  private invalidatedReads=new Set<string>();
   private sending=false;
   private generation=0;
   private draining=new Set<Promise<unknown>>();
   constructor(private identity:()=>Identity|undefined,private reader:Reader=command){}
-  close(preserveReads=false):void{this.generation++;for(const job of this.jobs.values())job.controller.abort();this.jobs.clear();if(!preserveReads)this.reads.clear();}
+  close(preserveReads=false):void{this.generation++;for(const job of this.jobs.values())job.controller.abort();this.jobs.clear();this.invalidatedReads.clear();if(!preserveReads)this.reads.clear();}
   get busy():boolean{return this.draining.size>0;}
   async settled():Promise<void>{await Promise.allSettled([...this.draining]);}
   friends():Promise<XboxFriend[]>{return this.request({op:'friends'},parseXboxFriends);}
@@ -68,18 +69,42 @@ export class XboxSocial {
   async send(xuid:unknown,text:unknown):Promise<XboxMessageReceipt>{
     if(!xboxUserId(xuid)||!xboxMessageText(text))throw Error('Enter a message of up to 256 characters.');
     if(this.sending)throw Error('A message is already being sent.');
+    const identity=this.identity();
     this.sending=true;
-    try{return await this.request({op:'send',xuid,text},parseXboxMessageReceipt);}finally{this.sending=false;}
+    try{return await this.request({op:'send',xuid,text},parseXboxMessageReceipt);}finally{
+      // Reads may finish while the POST is in flight, even on an uncertain send.
+      if(identity)this.invalidateConversation(identity,xuid);
+      this.sending=false;
+    }
+  }
+  private invalidateConversation(identity:Identity,xuid:string):void{
+    const key=JSON.stringify([identity.account,identity.binary,'conversation',xuid]);
+    this.reads.delete(key);
+    if(this.jobs.has(key))this.invalidatedReads.add(key);
   }
   private request<T>(request:SocialRequest,parse:(v:unknown)=>T):Promise<T>{
     const identity=this.identity();
     if(!identity)return Promise.reject(Error('Sign in and use a backend with Xbox friends and chat support.'));
     const key=JSON.stringify([identity.account,identity.binary,request.op,request.op==='friends'?'':request.xuid]);
-    if(request.op==='send')this.reads.delete(JSON.stringify([identity.account,identity.binary,'conversation',request.xuid]));
+    if(request.op==='send')this.invalidateConversation(identity,request.xuid);
     const cached=request.op==='send'?undefined:this.reads.get(key);
     if(cached&&cached.expires>Date.now())return Promise.resolve(structuredClone(cached.value) as T);
     this.reads.delete(key);
-    const pending=this.jobs.get(key);if(pending)return pending.result as Promise<T>;
+    const pending=this.jobs.get(key);
+    if(pending){
+      if(request.op==='conversation'&&this.invalidatedReads.has(key)){
+        // Keep the old child tracked and cancellable, but do not reconcile a
+        // new receipt against a GET that started before the mutation.
+        const generation=this.generation;
+        return pending.result.catch(()=>undefined).then(()=>{
+          const current=this.identity();
+          if(generation!==this.generation||current?.account!==identity.account||current.binary!==identity.binary)
+            throw Error('The account or backend changed. Open Friends again.');
+          return this.request(request,parse);
+        });
+      }
+      return pending.result as Promise<T>;
+    }
     if(this.jobs.size>=4)return Promise.reject(Error('Wait for the current Xbox requests to finish.'));
     const controller=new AbortController(),generation=this.generation;
     const result=(async()=>{
@@ -93,7 +118,7 @@ export class XboxSocial {
         try{value=JSON.parse(output);}catch{throw Error('Invalid Xbox response.');}
         if(!value||value.schema!==1||value.account!==identity.account)throw Error('Xbox response does not match the signed-in account.');
         const parsed=parse(value.result);
-        if(request.op!=='send'){
+        if(request.op!=='send'&&!this.invalidatedReads.has(key)){
           // Bound sensitive in-memory data and never let callers mutate the cache.
           while(this.reads.size>=12)this.reads.delete(this.reads.keys().next().value!);
           this.reads.set(key,{expires:Date.now()+(request.op==='friends'?45_000:10_000),value:structuredClone(parsed)});
@@ -105,7 +130,7 @@ export class XboxSocial {
         const message=error instanceof Error?error.message:'';
         if(uiErrors.has(message))throw error;
         throw Error('Xbox social services are unavailable. Try again later.');
-      }finally{if(this.jobs.get(key)?.controller===controller)this.jobs.delete(key);}
+      }finally{if(this.jobs.get(key)?.controller===controller){this.jobs.delete(key);this.invalidatedReads.delete(key);}}
     })();
     this.draining.add(result);
     void result.then(()=>this.draining.delete(result),()=>this.draining.delete(result));

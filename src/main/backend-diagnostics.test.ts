@@ -15,6 +15,34 @@ it('records social HTTP status and fixed failure stages without friends, message
   const wrong:unknown[]=[];new BackendDiagnosticReader('run',r=>wrong.push(r)).push(Buffer.from('NEXUS_SOCIAL_ERROR_V1 conversation-response\n'));expect(wrong).toEqual([]);
 });
 
+it('retains bounded outgoing-session stages without credentials, app IDs or policy payloads',()=>{
+  const frames=['chat-policy-http','chat-device-http','chat-context-http','chat-xsts-http'];
+  const failures=['chat-ticket-lifetime','chat-token-expired','chat-request-signature','chat-policy-audience','chat-privacy-request'];
+  const records:unknown[]=[];
+  const reader=new BackendDiagnosticReader('social',r=>records.push(r));
+  for(const byte of Buffer.from(frames.map(stage=>'NEXUS_SOCIAL_DIAGNOSTIC_V1 '+stage+' 200\r\n').join('')+
+    failures.map(stage=>'NEXUS_SOCIAL_ERROR_V1 '+stage+'\n').join('')))reader.push(Buffer.from([byte]));
+  expect(records).toHaveLength(frames.length+failures.length);
+  for(const frame of ['NEXUS_SOCIAL_DIAGNOSTIC_V1 chat-context-http 200 PRIVATE_TOKEN',
+    'NEXUS_SOCIAL_ERROR_V1 chat-secret-private','NEXUS_SOCIAL_DIAGNOSTIC_V1 chat-xsts-http 999'])reader.push(Buffer.from(frame+'\n'));
+  expect(records).toHaveLength(frames.length+failures.length);expect(JSON.stringify(records)).not.toContain('PRIVATE_TOKEN');
+  const wrong:unknown[]=[];
+  new BackendDiagnosticReader('run',r=>wrong.push(r)).push(Buffer.from('NEXUS_SOCIAL_DIAGNOSTIC_V1 chat-context-http 200\nNEXUS_SOCIAL_ERROR_V1 chat-token-expired\n'));
+  expect(wrong).toEqual([]);
+});
+
+it('records a fixed loader category without exposing the local binary path or missing library text (#328)',()=>{
+  const records:unknown[]=[];const reader=new BackendDiagnosticReader('probe',r=>records.push(r));
+  const lines=[
+    '/private/user/xodus-cli: error while loading shared libraries: libssl.so.3: cannot open shared object file: No such file or directory',
+    '/private/user/xodus-cli: error while loading shared libraries: libdbus-1.so.3: cannot open shared object file: No such file or directory',
+    "/private/user/xodus-cli: /lib/libc.so.6: version `GLIBC_2.38' not found (required by /private/user/xodus-cli)",
+  ];
+  for(const byte of Buffer.from(lines.join('\n')+'\n'))reader.push(Buffer.from([byte]));
+  expect(records.map((v:any)=>v.stage)).toEqual(['loader-openssl','loader-dbus','loader-glibc']);
+  expect(JSON.stringify(records)).not.toMatch(/private|libssl|libdbus|GLIBC_2/);
+});
+
 it('accepts only fixed receipt shape flags, never message IDs, payloads or raw error text',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-receipt-diagnostic-'));
   try{
