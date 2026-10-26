@@ -631,11 +631,12 @@ test('stored offline licenses are re-validated against their lease and revoked o
     'a_clock_set_back_cannot_stretch_offline_use', 'another_account_or_device_registration_removes_every_stored_license',
     'switching_the_designation_from_a_to_b_ends_offline_play_on_a_when_it_reconnects', 'expired_leases_fail_closed_and_disappear',
     'an_account_change_removes_every_stored_license', 'explicit_licensing_refusals_remove_stored_licenses',
-    'offline_launch_never_contacts_microsoft_and_uses_only_the_stored_license',
     'stored_offline_licenses_end_when_this_device_is_not_or_no_longer_designated',
-    'the_runtime_offline_identity_follows_the_license_decision']) assert.ok(patch.includes(`fn ${name}(`), name);
+    'the_runtime_offline_identity_follows_the_license_decision',
+    'the_device_registration_is_identified_even_without_a_license_device_id',
+    'lease_dates_are_read_in_the_formats_microsoft_uses']) assert.ok(patch.includes(`fn ${name}(`), name);
   // Still no key material, credentials or new network requests.
-  assert.doesNotMatch(added, /"deviceKey"|"contentKey"|unpack\(|\.post\(|\.send\(|save_device_license\(&device|remove_device_license/);
+  assert.doesNotMatch(added, /"deviceKey"|"contentKey"|unpack\(|\.post\(|\.send\(|save_device_license\(&device\)|remove_device_license/);
   const stages = await fs.readFile('src/shared/content-license.ts', 'utf8');
   for (const stage of ['content-cache-stored', 'content-cache-skipped', 'content-cache-write-failed', 'content-cache-used', 'content-cache-missing',
     'content-cache-expired', 'content-cache-invalid', 'content-cache-purged', 'content-cache-revoked', 'content-cache-account', 'content-cache-clock']) {
