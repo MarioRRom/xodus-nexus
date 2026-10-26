@@ -170,6 +170,7 @@ export interface GameOperation {
 }
 
 export interface Settings {
+  interfaceLanguage?: string;
   installRoot: string;
   market: string;
   parallelDownloads: number;
@@ -348,6 +349,8 @@ export interface CatalogSearchResult {
 export type LibraryAccess = 'owned' | 'gamepass' | 'other';
 export interface AccountLibraryPage {
   kind: 'all' | LibraryAccess;
+  sort?: 'recent-gamepass';
+  recentProductIds?: string[];
   products: (CatalogProduct & { access: LibraryAccess })[];
   accessByProductId: Record<string, LibraryAccess>;
   unclassifiedEntitlements?: number;
@@ -355,8 +358,6 @@ export interface AccountLibraryPage {
   cursor?: string;
   checkedAt: string;
   skippedEntitlements?: number;
-  sort?: 'recent-gamepass';
-  recentProductIds?: string[];
 }
 
 export interface LauncherApi {

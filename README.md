@@ -63,6 +63,7 @@ Flatpak version available through Discover. Other browsers are not supported.
 - Game settings offer an optional **DualSense compatibility mode** if a standard DualSense is not detected. It applies only to that game and may disable advanced haptics and adaptive triggers.
 - Choose **Add to Steam** in the game menu, or **Add Nexus to Steam** in Settings, to create a Non-Steam shortcut with available artwork. Steam can stay running, including in Game Mode. Requires native Linux Steam; Flatpak Steam is not yet supported.
 - Update the launcher, backend and runtime in **Settings**.
+- **Settings → Interface language** selects a bundled translation independently of game language and Store region. Missing translations fall back to English.
 - **Settings → Downloads** sets a combined game download speed limit in MiB/s (0 means unlimited). A supporting Nexus backend is required; saving the limit also applies it to active downloads.
 - **Settings → Shader cache** sets the per-game Mesa/NVIDIA driver cache limit, 4 GiB by default. Changes apply on the next game launch; explicit environment overrides take precedence.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
@@ -204,3 +205,5 @@ The Nexus runtime includes [FFmpeg](https://ffmpeg.org/) shared libraries under
 LGPL 2.1 or later; its corresponding pinned source and build recipe accompany
 each runtime release.
 [Contributing](CONTRIBUTING.md)
+
+Community translations: [translation guide](docs/TRANSLATING.md).

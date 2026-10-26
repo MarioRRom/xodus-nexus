@@ -29,7 +29,7 @@ it('keeps unknown-source counts in diagnostics instead of rendering a technical 
   expect(library).not.toContain('Some active licenses have an unrecognized source');
   // Actual failures and incomplete results still need a visible way to debug.
   expect(library).toContain('visible?.skippedEntitlements || visible?.excludedEntitlements');
-  expect(library).toContain('Some license records could not be verified and were omitted.');
+  expect(library).toContain('ui.some_license_records_could_not_be_verified_and_w_8d3b7e0');
   expect(library).toContain('{error ?');
   expect(library).toContain('<BackendLogButton toast={toast} />');
   const settings = renderToStaticMarkup(<SettingsPage data={demoSnapshot()} toast={() => {}} />);

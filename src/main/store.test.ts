@@ -7,6 +7,18 @@ import type { DownloadTask } from '../shared/types.js';
 
 const created: string[] = [];
 
+it('persists interface language independently and migrates invalid saved values safely', async () => {
+  const directory=await mkdtemp(path.join(tmpdir(),'nexus-interface-state-'));created.push(directory);
+  const store=new StateStore(directory);await store.load();expect(store.settings.interfaceLanguage).toBe('system');
+  const original={...store.settings};await store.setSettings({interfaceLanguage:'pt-BR'});
+  const reopened=new StateStore(directory);await reopened.load();expect(reopened.settings).toEqual({...original,interfaceLanguage:'pt-BR'});
+  await expect(reopened.setSettings({interfaceLanguage:'../cs'})).rejects.toThrow('Invalid interface language');
+  for(const interfaceLanguage of [null,42,'cs_CZ','../cs',undefined]){
+    await writeFile(path.join(directory,'launcher-state.json'),JSON.stringify({settings:{...original,interfaceLanguage}}));
+    const migrated=new StateStore(directory);await migrated.load();expect(migrated.settings).toEqual({...original,interfaceLanguage:'system'});
+  }
+});
+
 it('persists a custom shader cache limit and safely migrates missing or invalid values to 4 GiB',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'nexus-cache-state-'));created.push(directory);
   const store=new StateStore(directory);await store.load();expect(store.settings.shaderCacheLimitGiB).toBe(4);

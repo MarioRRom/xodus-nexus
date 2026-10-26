@@ -110,7 +110,17 @@ const ipc = (name: string, ...args: any[]) => h.handlers.get(name)!(undefined, .
 const snapshot = () => ipc('get-snapshot');
 const install = (letter: string, destination = path.join(h.root, `download-${letter}`)) => ipc('start-install', { productId: `9${letter.repeat(11)}`, title: `Sample ${letter}`, destination });
 
-
+it('saves interface language without probing account, restarting components or altering game language and market', async () => {
+  const before = await snapshot();
+  const counts = [h.backendRefreshes, h.runtimeRefreshes, h.accountRequests, h.downloads.length];
+  const settings = await ipc('update-settings', { interfaceLanguage: 'cs' });
+  expect(settings).toEqual({ ...before.settings, interfaceLanguage: 'cs' });
+  expect([h.backendRefreshes, h.runtimeRefreshes, h.accountRequests, h.downloads.length]).toEqual(counts);
+  expect((await snapshot()).games).toEqual(before.games);
+  for (const value of ['../cs', 'cs_CZ', '', null, 42]) await expect(ipc('update-settings', { interfaceLanguage: value })).rejects.toThrow('Invalid interface language');
+  expect((await snapshot()).settings.interfaceLanguage).toBe('cs');
+  await ipc('update-settings', { interfaceLanguage: before.settings.interfaceLanguage ?? 'system' });
+});
 
 it('adds fresh advisory target storage to public package preflight without creating a folder or starting a transfer (#247)', async () => {
   const destination=path.join(h.root,'storage-preview','game'),before=h.downloads.length;

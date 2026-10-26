@@ -8,6 +8,8 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AppSnapshot, AuthStatus, DownloadTask, Game, GameLaunchOptions, GameOperation, GameUpdate, InstallRequest, Settings } from '../shared/types.js';
 import { downloadFailure, safeProductId } from '../shared/utils.js';
 import { contentLicenseFailure } from '../shared/content-license.js';
+import { interfaceLanguagePreference } from '../shared/interface-language.js';
+import { nativeTranslator } from './interface-language.js';
 import { downloadLimitArgs, downloadLimitKiB } from '../shared/download-bandwidth.js';
 import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-bandwidth.js';
 import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cache.js';
@@ -71,10 +73,13 @@ import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+function nativeText(text: string): string {
+  return nativeTranslator(store?.settings.interfaceLanguage ?? 'system', app.getPreferredSystemLanguages?.() ?? ['en']).text(text);
+}
 const downloadNotifications = new DownloadCompletionNotifications({
   isSupported: () => Notification.isSupported(),
   show: options => {
-    const notification = new Notification({ ...options, icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)), urgency: 'normal' });
+    const notification = new Notification({ ...options, title: nativeText(options.title), body: nativeText(options.body), icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)), urgency: 'normal' });
     notification.on('failed', () => console.warn('The desktop could not display a download completion notification.'));
     notification.show();
   },
@@ -198,7 +203,7 @@ async function showLauncher(): Promise<void> {
 }
 async function shortcutError(error: unknown): Promise<void> {
   await showLauncher();
-  await dialog.showMessageBox(mainWindow!, { type: 'error', title: 'Unable to launch game',
+  await dialog.showMessageBox(mainWindow!, { type: 'error', title: nativeText('Unable to launch game'),
     message: error instanceof Error ? error.message : 'The game could not be launched.' });
 }
 function finishShortcutSession(): void {
@@ -448,7 +453,7 @@ async function runAuth(command: 'login' | 'logout'): Promise<void> {
       throw Error('Update the Nexus backend in Settings before signing in with this launcher.');
     }
     if (command === 'login') await prepareSystemWallet();
-    const view = fallbackAuthViewFactory(request => authViewFactory(mainWindow ?? undefined, undefined, request), () => browserAuthViewFactory());
+    const view = fallbackAuthViewFactory(request => authViewFactory(mainWindow ?? undefined, undefined, request, nativeText), () => browserAuthViewFactory());
     if (shutdownStarted) throw Error('The launcher is closing.');
     await accountProfile.select(undefined);
     if (shutdownStarted) throw Error('The launcher is closing.');
@@ -973,7 +978,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       const current=()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch;
       inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),current,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
         if(!Notification.isSupported())return;
-        try{const notice=new Notification({title:'Game invitation',body:`${sender} invited you to ${game.title}. Open Friends to accept.`,urgency:'normal'});notice.on('click',()=>{void showFriends().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
+        try{const notice=new Notification({title:nativeText('Game invitation'),body:nativeText(`${sender} invited you to ${game.title}. Open Friends to accept.`),urgency:'normal'});notice.on('click',()=>{void showFriends().catch(()=>{});});notice.on('failed',()=>{});notice.show();}catch{/* The dock remains available without desktop notifications. */}
       },new XboxTitlePresence(current,addGameLog));
       try{
         await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
@@ -1551,19 +1556,19 @@ function registerIpc(): void {
     const artwork = game ? { cover: await gameSteamPortrait(cover ?? fallback).catch(() => cover ?? fallback), wide: wide ?? cover ?? fallback }
       : await nexusSteamArtwork(fallback).catch(() => ({ cover: fallback, wide: fallback }));
     if (await steamRunning()) return addLiveSteamShortcut(accounts, launch, desktop, artwork, undefined, undefined, async existing => {
-      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: 'Steam shortcut already exists',
-        message: 'Reuse an existing shortcut, or ask Steam to add it for the currently signed-in account?',
-        detail: 'Choose an existing profile to avoid creating a duplicate in that account.',
+      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: nativeText('Steam shortcut already exists'),
+        message: nativeText('Reuse an existing shortcut, or ask Steam to add it for the currently signed-in account?'),
+        detail: nativeText('Choose an existing profile to avoid creating a duplicate in that account.'),
         cancelId: existing.length + 1, defaultId: existing.length + 1,
-        buttons: [...existing.map(account => `Use Steam profile ${path.basename(path.dirname(account))}`), 'Add for signed-in account', 'Cancel'] });
+        buttons: [...existing.map(account => nativeText(`Use Steam profile ${path.basename(path.dirname(account))}`)), nativeText('Add for signed-in account'), nativeText('Cancel')] });
       if (!Number.isInteger(choice.response) || choice.response < 0 || choice.response > existing.length) throw Error('Add to Steam cancelled.');
       return choice.response === existing.length ? undefined : existing[choice.response];
     });
     let selected = 0;
     if (accounts.length > 1) {
-      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: 'Choose Steam profile',
-        message: 'Which Steam profile should receive this shortcut?', cancelId: accounts.length, defaultId: accounts.length,
-        buttons: [...accounts.map(account => `Steam profile ${path.basename(path.dirname(account))}`), 'Cancel'] });
+      const choice = await dialog.showMessageBox(mainWindow!, { type: 'question', title: nativeText('Choose Steam profile'),
+        message: nativeText('Which Steam profile should receive this shortcut?'), cancelId: accounts.length, defaultId: accounts.length,
+        buttons: [...accounts.map(account => nativeText(`Steam profile ${path.basename(path.dirname(account))}`)), nativeText('Cancel')] });
       selected = choice.response;
       if (selected >= accounts.length) throw Error('Add to Steam cancelled.');
     }
@@ -1615,6 +1620,10 @@ function registerIpc(): void {
     }
     if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const).some(key => patch[key] !== undefined && patch[key] !== store.settings[key])) ensureIdle();
     const allowed: Partial<Settings> = {};
+    if (patch.interfaceLanguage !== undefined) {
+      if (interfaceLanguagePreference(patch.interfaceLanguage) !== patch.interfaceLanguage) throw Error('Invalid interface language.');
+      allowed.interfaceLanguage = patch.interfaceLanguage;
+    }
     if (patch.shaderCacheLimitGiB !== undefined) allowed.shaderCacheLimitGiB = patch.shaderCacheLimitGiB;
     if (patch.downloadLimitMiB !== undefined) allowed.downloadLimitMiB = patch.downloadLimitMiB;
     if (typeof patch.installRoot === 'string') allowed.installRoot = path.resolve(patch.installRoot);
@@ -1836,7 +1845,7 @@ async function createWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
-  if (startupError) { dialog.showErrorBox('Invalid Nexus shortcut', startupError.message); app.quit(); return; }
+  if (startupError) { dialog.showErrorBox(nativeText('Invalid Nexus shortcut'), startupError.message); app.quit(); return; }
   if (!demoMode) {
     backendDiagnostics = new BackendDiagnostics(app.getPath('userData'), () => ({
       launcher: app.getVersion(), backend: backend?.current.version, source: backend?.current.source,
@@ -1925,7 +1934,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => { void showLauncher(); });
 }).catch((error) => {
   console.error(error);
-  if (startupRequest.gameId && primaryInstance) dialog.showErrorBox('Unable to start Nexus', error instanceof Error ? error.message : String(error));
+  if (startupRequest.gameId && primaryInstance) dialog.showErrorBox(nativeText('Unable to start Nexus'), error instanceof Error ? error.message : String(error));
   app.quit();
 });
 
