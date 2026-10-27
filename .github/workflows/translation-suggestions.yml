@@ -6,10 +6,18 @@ on:
       mode:
         description: 'Preview, accept, or accept and mark technically checked translations Reviewed'
         type: choice
-        options: [preview, accept, accept-and-review]
+        options: [preview, review-texts, accept, accept-and-review]
         default: preview
       languages:
         description: 'Optional comma-separated target language tags, e.g. fr,es. Empty selects all targets.'
+        type: string
+        default: ''
+      review_digest:
+        description: 'Optional SHA256 from a reviewed preview. Stops before writes if eligible texts changed.'
+        type: string
+        default: ''
+      exclude:
+        description: 'Optional comma-separated language:key exclusions from language review, e.g. fr:auth.browser'
         type: string
         default: ''
 
@@ -43,17 +51,22 @@ jobs:
           TOLGEE_REVIEW_API_KEY: ${{ secrets.TOLGEE_REVIEW_API_KEY }}
           REVIEW_MODE: ${{ inputs.mode }}
           REVIEW_LANGUAGES: ${{ inputs.languages }}
+          REVIEW_DIGEST: ${{ inputs.review_digest }}
+          REVIEW_EXCLUDE: ${{ inputs.exclude }}
         shell: bash
         run: |
           set -euo pipefail
           args=()
           case "$REVIEW_MODE" in
             preview) ;;
+            review-texts) args+=(--texts) ;;
             accept) args+=(--apply) ;;
             accept-and-review) args+=(--apply --reviewed) ;;
             *) echo 'Invalid mode' >&2; exit 1 ;;
           esac
           if [ -n "$REVIEW_LANGUAGES" ]; then args+=(--languages "$REVIEW_LANGUAGES"); fi
+          if [ -n "$REVIEW_DIGEST" ]; then args+=(--review-digest "$REVIEW_DIGEST"); fi
+          if [ -n "$REVIEW_EXCLUDE" ]; then args+=(--exclude "$REVIEW_EXCLUDE"); fi
           node scripts/tolgee-accept.mjs "${args[@]}" | tee tolgee-suggestion-report.json
       - uses: actions/upload-artifact@v4
         if: always()
