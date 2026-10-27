@@ -148,6 +148,31 @@ test('JWE support changes only licensing ticket formatting, not Xbox or Store au
   assert.ok(build.includes("'-p', 'xodus', 'content_ticket_'"));
 });
 
+test('Xbox sign-in sends compact JWE delegation tickets as t= and keeps opaque tickets byte-exact (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(p => p.file === 'xodus-xbox-jwe-ticket.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.ok(lock.patches.findIndex(p => p.file === entry.file) >
+    lock.patches.findIndex(p => p.file === 'xodus-licensing-jwe.patch'));
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]);
+  assert.deepEqual(files.sort(), ['crates/xodus/src/models/licensing_ticket_tests.rs', 'crates/xodus/src/models/secrets.rs']);
+  for (const expected of ['fn delegation_ticket(value: String) -> String',
+    'if is_compact_jwe(&value) { format!("t={value}") } else { format!("d={value}") }',
+    'xbox_delegation_ticket_prefix_follows_the_ticket_encoding']) assert.ok(patch.includes(expected), expected);
+  const removed = patch.split('\n').filter(line => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, [
+    '-        assert_eq!(original, format!("d={raw}"), "Xbox token conversion is unchanged");',
+    '-            "urn:passport:delegationcompact" => Self::Compact(format!(',
+    '-                "d={}",',
+    '-                    .value',
+    '-/// Keep Token conversion (Xbox) and store_ticket (Store) unchanged.',
+  ]);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.ok(build.includes("'-p', 'xodus', 'xbox_delegation_ticket_'"));
+});
+
 test('auth response consistency and coherent credential persistence are pinned and account-free tested', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   assert.ok(lock.patches.some(p => p.file === 'xodus-auth-consistency.patch'));
