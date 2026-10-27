@@ -190,3 +190,34 @@ only. It activates that existing user service if the standard Secret Service
 name has neither an owner nor an activation provider. Existing/default providers
 are left alone. No packages, keyring configuration or plaintext fallback are
 introduced, and keyring failures remain errors.
+
+## Incremental game updates
+
+Streaming updates stage one changed file at a time in `.nexus-update-v1` under
+its game folder. The space check counts the largest replacement plus net growth
+and a metadata reserve, rather than requiring another full installation. A
+finished file is synced and atomically renamed; incomplete files and checkpoints
+remain available for Retry. The completed package marker changes only after all
+files finish. Cancellation can leave a mixture of old and updated files; finish
+the update before playing. This is per-file protection, not whole-game rollback.
+
+Matching package page hashes can identify old data even after archive offsets
+move. Before reuse, installed plaintext is encrypted in memory with the normal
+licensed package key and the new page's XTS parameters, then checked against the
+new package's truncated SHA-256. Ciphertext files are checked directly. Modified,
+missing, short or unverifiable pages are downloaded using the existing bounded
+HTTP transfer path. No keys are written to the update journal. Small reusable
+islands between missing pages may also be downloaded to avoid tiny HTTP requests.
+This does not implement Microsoft's XSP delta format, and a full download remains
+the fallback when no local data verifies.
+
+Nexus shows separate local-reuse and network byte counters. Overall progress and
+ETA measure files rebuilt, including local copying; they are not network totals.
+Unchanged optional archives retain their existing zero-byte placeholders; updates
+do not implicitly install omitted language/content packs. Encrypted executables
+still receive the existing truncated-ciphertext repair check.
+
+`cargo test --no-default-features -p xodus-cli -p msixvc streaming_` covers relocated
+and corrupt pages, partial staged resumes, licensed plaintext/ciphertext checks,
+wrong keys, space accounting, safe replacement, plus existing HTTP/pause/resume
+and failure handling. Tests use synthetic fixtures and loopback HTTP only.
