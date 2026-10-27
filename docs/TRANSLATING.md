@@ -60,6 +60,14 @@ languages (for example `fr,es`). One run processes all eligible suggestions and
 produces a report of accepted and skipped keys. It does not build, publish, merge
 or change bundled translation files.
 
+Choose `review-texts` to include the eligible English/target UI pairs for language
+review in the report. These are public project strings, without contributor
+identifiers. Other modes omit text. Copy the resulting `reviewDigest` into the
+workflow's `review_digest` input when accepting that batch: it stops before writes
+if eligible texts changed. Use `exclude` (for example `fr:auth.browser`) to leave
+incorrect wording pending while accepting the rest. The digest covers the whole
+eligible batch before exclusions. Keep the same selected languages in both runs.
+
 Configure a separate `TOLGEE_REVIEW_API_KEY` repository secret, restricted to
 project **36162**, with `keys.view`, `translations.view`, `translations.edit` and
 `translations.state-edit`. Restrict editing and state changes to target languages
@@ -91,7 +99,8 @@ npm run i18n:accept -- --languages fr --apply --reviewed
 
 The first command previews without writes. The second accepts eligible French
 suggestions and marks them reviewed. Reports contain key names, language tags and
-outcomes, not credentials, contributor identifiers or translation text.
+outcomes, not credentials or contributor identifiers. Only the explicit
+`review-texts` mode includes public UI text for language review (`--texts` locally).
 
 ### Reviewed translations back into Git
 
