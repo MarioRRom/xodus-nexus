@@ -44,7 +44,12 @@ export function assess(row, language, english) {
   const cell = row.translations?.[language.tag];
   const result = reason => ({ reason });
   if (language.base || /^en(?:-|$)/i.test(language.tag)) return result('protected-source');
-  if (!id(row.keyId) || !own(english, row.keyName) || row.keyNamespace || row.branch) return result('unknown-key-or-scope');
+  if (!id(row.keyId) || !own(english, row.keyName)) return result('unknown-key');
+  if (row.keyNamespace) return result('nondefault-namespace');
+  // Tolgee creates a main branch even before branching is enabled. The unfiltered
+  // list endpoint returns only default-branch or legacy branchless keys. ID lookups
+  // bypass that server filter, so retain this allowlist and compare snapshots below.
+  if (row.branch != null && row.branch !== 'main') return result('unsupported-branch');
   if (row.keyIsPlural !== false) return result('plural-needs-review');
   if (!cell || cell.text != null && cell.text !== '' || cell.state !== 'UNTRANSLATED') return result('existing-translation');
   if (cell.outdated !== false || cell.unresolvedCommentCount !== 0 || (cell.qaIssueCount ?? 0) !== 0) return result('flagged-translation');
@@ -148,7 +153,7 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
     // eliminate, races with a human editing the same translation during this run.
     const fresh = await pages(api, viewRoute(['en', language.tag], row.keyId), 'keys', 1);
     const next = fresh.length === 1 ? assess(fresh[0], language, english) : {};
-    if (fresh[0]?.keyId !== row.keyId || next.reason !== 'eligible' || next.suggestion.id !== decision.suggestion.id || next.suggestion.translation !== decision.suggestion.translation) {
+    if (fresh[0]?.keyId !== row.keyId || fresh[0]?.branch !== row.branch || next.reason !== 'eligible' || next.suggestion.id !== decision.suggestion.id || next.suggestion.translation !== decision.suggestion.translation) {
       entry.status = 'changed-before-accept'; continue;
     }
     const route = `${project}/languages/${language.id}/key/${row.keyId}/suggestion`;
@@ -163,7 +168,7 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
     report.accepted++; entry.status = 'accepted';
     const after = await pages(api, viewRoute(['en', language.tag], row.keyId), 'keys', 1);
     const target = after[0]?.translations?.[language.tag];
-    if (after[0]?.keyId !== row.keyId || after[0]?.keyName !== row.keyName || fromTolgee(after[0]?.translations?.en?.text) !== english[row.keyName] || target?.text !== decision.suggestion.translation || !id(target?.id) || target.outdated !== false) throw Error('Accepted translation could not be verified; stopped.');
+    if (after[0]?.keyId !== row.keyId || after[0]?.keyName !== row.keyName || after[0]?.branch !== row.branch || after[0]?.keyNamespace !== row.keyNamespace || fromTolgee(after[0]?.translations?.en?.text) !== english[row.keyName] || target?.text !== decision.suggestion.translation || !id(target?.id) || target.outdated !== false) throw Error('Accepted translation could not be verified; stopped.');
     if (reviewed) {
       entry.status = 'accepted-review-outcome-unknown';
       const state = await api(`${project}/translations/${target.id}/set-state/REVIEWED`, 'PUT');
