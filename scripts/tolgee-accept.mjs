@@ -75,12 +75,16 @@ export function assess(row, language, english) {
 }
 
 /** Never follow response-provided links, redirects, or print response bodies/tokens. */
-export function createApi(key, fetcher = fetch, wait = pause) {
+export function createApi(key, fetcher = fetch, wait = pause, interval = 0) {
   if (typeof key !== 'string' || !key.trim() || /[\r\n]/.test(key)) throw Error('Set TOLGEE_REVIEW_API_KEY to a project-scoped review key.');
+  let lastRequest = 0;
   return async (route, method = 'GET') => {
     if (!route.startsWith(`${project}/`) || route.includes('..') || /[\\#\r\n]/.test(route) || !['GET', 'PUT'].includes(method)) throw Error('Invalid API operation.');
     let response;
     for (let attempt = 0; attempt < 3; attempt++) {
+      const spacing = interval - (Date.now() - lastRequest);
+      if (spacing > 0) await wait(spacing);
+      lastRequest = Date.now();
       try {
         response = await fetcher(`https://app.tolgee.io${route}`, {
           method, headers: { 'X-API-Key': key, accept: 'application/json' },
@@ -89,9 +93,11 @@ export function createApi(key, fetcher = fetch, wait = pause) {
       } catch { throw Error(`Tolgee ${method} transport failed. No automatic retry; check the report before rerunning.`); }
       if (method !== 'GET' || response.status !== 429 || attempt === 2) break;
       const header = response.headers.get('retry-after');
-      const delay = header === null ? 60000 : /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now();
+      // Tolgee's documented translation-view window is five minutes. A missing
+      // header must not cause repeated one-minute requests inside the same window.
+      const delay = header === null ? 301000 : /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now();
       await response.body?.cancel();
-      if (!Number.isFinite(delay) || delay > 120000) throw Error('Tolgee read rate limit requires a later attempt. No writes retried.');
+      if (!Number.isFinite(delay) || delay > 360000) throw Error('Tolgee read rate limit requires a later attempt. No writes retried.');
       const milliseconds = Math.max(1000, delay);
       console.error(`Tolgee read rate limited; waiting ${Math.ceil(milliseconds / 1000)} seconds.`);
       await wait(milliseconds);
@@ -134,7 +140,7 @@ function viewRoute(tags, keyId) {
   const query = new URLSearchParams();
   for (const tag of tags) query.append('languages', tag);
   query.set('sort', 'keyId,asc');
-  if (keyId) query.set('filterKeyId', String(keyId));
+  if (keyId) for (const value of Array.isArray(keyId) ? keyId : [keyId]) query.append('filterKeyId', String(value));
   return `${project}/translations?${query}`;
 }
 
@@ -174,34 +180,45 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
   const excluded = new Set(exclude);
   for (const { language, row, entry } of pending) if (excluded.has(`${language.tag}:${row.keyName}`)) entry.status = 'excluded-by-language-review';
   if (!apply) return report;
-  for (const { row, language, decision, entry } of pending) {
-    if (entry.status === 'excluded-by-language-review') continue;
-    // Tolgee has no conditional/transactional accept endpoint. Minimize, but cannot
-    // eliminate, races with a human editing the same translation during this run.
-    const fresh = await pages(api, viewRoute(['en', language.tag], row.keyId), 'keys', 1);
-    const next = fresh.length === 1 ? assess(fresh[0], language, english) : {};
-    if (fresh[0]?.keyId !== row.keyId || fresh[0]?.branch !== row.branch || next.reason !== 'eligible' || next.suggestion.id !== decision.suggestion.id || next.suggestion.translation !== decision.suggestion.translation) {
-      entry.status = 'changed-before-accept'; continue;
+  const selected = pending.filter(value => value.entry.status !== 'excluded-by-language-review');
+  // Use Tolgee's supported multi-key view filter. Two views per twenty entries,
+  // rather than two per entry, stay below its 100-views/five-minute limit.
+  // There is no server CAS: do not edit these keys concurrently with the batch.
+  for (let start = 0; start < selected.length; start += 20) {
+    const batch = selected.slice(start, start + 20);
+    const keys = [...new Set(batch.map(value => value.row.keyId))];
+    const tags = ['en', ...new Set(batch.map(value => value.language.tag))];
+    const fresh = await pages(api, viewRoute(tags, keys), 'keys', keys.length);
+    const freshById = new Map(fresh.map(value => [value.keyId, value]));
+    const acceptedBatch = [];
+    for (const item of batch) {
+      const { row, language, decision, entry } = item;
+      const current = freshById.get(row.keyId);
+      const next = current ? assess(current, language, english) : {};
+      if (current?.keyName !== row.keyName || current?.keyNamespace !== row.keyNamespace || current?.branch !== row.branch || next.reason !== 'eligible' || next.suggestion.id !== decision.suggestion.id || next.suggestion.translation !== decision.suggestion.translation) {
+        entry.status = 'changed-before-accept'; continue;
+      }
+      const route = `${project}/languages/${language.id}/key/${row.keyId}/suggestion`;
+      entry.status = 'accept-outcome-unknown';
+      const receipt = await api(`${route}/${decision.suggestion.id}/accept?declineOther=false`, 'PUT');
+      const accepted = receipt.accepted;
+      if (accepted?.id !== decision.suggestion.id || accepted.languageId !== language.id || accepted.keyId !== row.keyId || accepted.state !== 'ACCEPTED' || accepted.translation !== decision.suggestion.translation || !Array.isArray(receipt.declined) || receipt.declined.length) throw Error('Unexpected acceptance receipt; stopped without retry.');
+      report.accepted++; entry.status = 'accepted'; acceptedBatch.push(item);
     }
-    const route = `${project}/languages/${language.id}/key/${row.keyId}/suggestion`;
-    // The freshly read translation view already proves activeSuggestionCount=1
-    // and includes that exact ACTIVE suggestion. The separate paginated suggestion
-    // GET requires suggest/manage scopes not needed for accepting it. Keep the
-    // fresh view checks above and verify full key/language identity in the receipt.
-    entry.status = 'accept-outcome-unknown';
-    const receipt = await api(`${route}/${decision.suggestion.id}/accept?declineOther=false`, 'PUT');
-    const accepted = receipt.accepted;
-    if (accepted?.id !== decision.suggestion.id || accepted.languageId !== language.id || accepted.keyId !== row.keyId || accepted.state !== 'ACCEPTED' || accepted.translation !== decision.suggestion.translation || !Array.isArray(receipt.declined) || receipt.declined.length) throw Error('Unexpected acceptance receipt; stopped without retry.');
-    report.accepted++; entry.status = 'accepted';
-    const after = await pages(api, viewRoute(['en', language.tag], row.keyId), 'keys', 1);
-    const target = after[0]?.translations?.[language.tag];
-    if (after[0]?.keyId !== row.keyId || after[0]?.keyName !== row.keyName || after[0]?.branch !== row.branch || after[0]?.keyNamespace !== row.keyNamespace || fromTolgee(after[0]?.translations?.en?.text) !== english[row.keyName] || target?.text !== decision.suggestion.translation || !id(target?.id) || target.outdated !== false) throw Error('Accepted translation could not be verified; stopped.');
-    if (reviewed) {
-      entry.status = 'accepted-review-outcome-unknown';
-      const state = await api(`${project}/translations/${target.id}/set-state/REVIEWED`, 'PUT');
-      if (state.id !== target.id || state.text !== decision.suggestion.translation || state.state !== 'REVIEWED' || state.outdated !== false) throw Error('Reviewed translation could not be verified; stopped.');
-      entry.status = 'accepted-and-reviewed'; report.reviewed++;
-      if (report.reviewed % 25 === 0) console.error(`${report.reviewed} translations accepted and reviewed in this run.`);
+    if (!acceptedBatch.length) continue;
+    const after = await pages(api, viewRoute(tags, keys), 'keys', keys.length);
+    const afterById = new Map(after.map(value => [value.keyId, value]));
+    for (const { row, language, decision, entry } of acceptedBatch) {
+      const current = afterById.get(row.keyId);
+      const target = current?.translations?.[language.tag];
+      if (current?.keyName !== row.keyName || current?.branch !== row.branch || current?.keyNamespace !== row.keyNamespace || fromTolgee(current?.translations?.en?.text) !== english[row.keyName] || target?.text !== decision.suggestion.translation || !id(target?.id) || target.outdated !== false) throw Error('Accepted translation could not be verified; stopped.');
+      if (reviewed) {
+        entry.status = 'accepted-review-outcome-unknown';
+        const state = await api(`${project}/translations/${target.id}/set-state/REVIEWED`, 'PUT');
+        if (state.id !== target.id || state.text !== decision.suggestion.translation || state.state !== 'REVIEWED' || state.outdated !== false) throw Error('Reviewed translation could not be verified; stopped.');
+        entry.status = 'accepted-and-reviewed'; report.reviewed++;
+        if (report.reviewed % 25 === 0) console.error(`${report.reviewed} translations accepted and reviewed in this run.`);
+      }
     }
   }
   return report;
@@ -239,7 +256,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const options = argumentsFor(process.argv.slice(2));
     const english = parseCatalog(await fs.readFile(path.join(root, 'assets/locales/en.json'), 'utf8'));
-    await acceptSuggestions({ ...options, english, report, api: createApi(process.env.TOLGEE_REVIEW_API_KEY) });
+    await acceptSuggestions({ ...options, english, report, api: createApi(process.env.TOLGEE_REVIEW_API_KEY, fetch, pause, 200) });
   } catch (error) {
     report.error = error.message;
     process.exitCode = 1;
