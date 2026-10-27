@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { setTimeout as pause } from 'node:timers/promises';
 import { parseCatalog } from './localization.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -74,17 +75,27 @@ export function assess(row, language, english) {
 }
 
 /** Never follow response-provided links, redirects, or print response bodies/tokens. */
-export function createApi(key, fetcher = fetch) {
+export function createApi(key, fetcher = fetch, wait = pause) {
   if (typeof key !== 'string' || !key.trim() || /[\r\n]/.test(key)) throw Error('Set TOLGEE_REVIEW_API_KEY to a project-scoped review key.');
   return async (route, method = 'GET') => {
     if (!route.startsWith(`${project}/`) || route.includes('..') || /[\\#\r\n]/.test(route) || !['GET', 'PUT'].includes(method)) throw Error('Invalid API operation.');
     let response;
-    try {
-      response = await fetcher(`https://app.tolgee.io${route}`, {
-        method, headers: { 'X-API-Key': key, accept: 'application/json' },
-        redirect: 'error', signal: AbortSignal.timeout(15000),
-      });
-    } catch { throw Error(`Tolgee ${method} transport failed. No automatic retry; check the report before rerunning.`); }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetcher(`https://app.tolgee.io${route}`, {
+          method, headers: { 'X-API-Key': key, accept: 'application/json' },
+          redirect: 'error', signal: AbortSignal.timeout(15000),
+        });
+      } catch { throw Error(`Tolgee ${method} transport failed. No automatic retry; check the report before rerunning.`); }
+      if (method !== 'GET' || response.status !== 429 || attempt === 2) break;
+      const header = response.headers.get('retry-after');
+      const delay = header === null ? 60000 : /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now();
+      await response.body?.cancel();
+      if (!Number.isFinite(delay) || delay > 120000) throw Error('Tolgee read rate limit requires a later attempt. No writes retried.');
+      const milliseconds = Math.max(1000, delay);
+      console.error(`Tolgee read rate limited; waiting ${Math.ceil(milliseconds / 1000)} seconds.`);
+      await wait(milliseconds);
+    }
     if (!response.ok) { await response.body?.cancel(); throw Error(`Tolgee ${method} failed (HTTP ${response.status}). No automatic retry.`); }
     const reader = response.body?.getReader();
     if (!reader) throw Error('Missing Tolgee response.');
@@ -190,6 +201,7 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
       const state = await api(`${project}/translations/${target.id}/set-state/REVIEWED`, 'PUT');
       if (state.id !== target.id || state.text !== decision.suggestion.translation || state.state !== 'REVIEWED' || state.outdated !== false) throw Error('Reviewed translation could not be verified; stopped.');
       entry.status = 'accepted-and-reviewed'; report.reviewed++;
+      if (report.reviewed % 25 === 0) console.error(`${report.reviewed} translations accepted and reviewed in this run.`);
     }
   }
   return report;
