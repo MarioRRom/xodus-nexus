@@ -301,6 +301,26 @@ test('real HTTP fixture executes preview then acceptance and review, no live acc
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('GET 429 honors bounded Retry-After, PUT and uncertain requests are never retried', async () => {
+  const waits = []; let calls = 0;
+  const api = createApi('synthetic-only', async () => {
+    calls++;
+    return calls < 3 ? new Response('{}', { status: 429, headers: { 'retry-after': '2' } }) : new Response('{"ok":true}');
+  }, async milliseconds => { waits.push(milliseconds); });
+  assert.deepEqual(await api('/v2/projects/36162/languages'), { ok: true });
+  assert.deepEqual(waits, [2000, 2000]); assert.equal(calls, 3);
+  for (const method of ['GET', 'PUT']) {
+    let attempts = 0;
+    const limited = createApi('synthetic-only', async () => { attempts++; return new Response('{}', { status: 429 }); }, async () => {});
+    await assert.rejects(limited('/v2/projects/36162/languages', method), /HTTP 429/);
+    assert.equal(attempts, method === 'GET' ? 3 : 1);
+  }
+  for (const header of ['99999', 'invalid']) {
+    const limited = createApi('synthetic-only', async () => new Response('{}', { status: 429, headers: { 'retry-after': header } }), async () => { throw Error('Must not wait'); });
+    await assert.rejects(limited('/v2/projects/36162/languages'), /later attempt/);
+  }
+});
+
 test('CLI is default preview, unknown/duplicate/injected flags fail closed', () => {
   assert.deepEqual(argumentsFor([]), { apply: false, reviewed: false, tags: [] });
   assert.deepEqual(argumentsFor(['--apply', '--reviewed', '--languages', 'fr,es']), { apply: true, reviewed: true, tags: ['fr', 'es'] });

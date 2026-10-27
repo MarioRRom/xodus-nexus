@@ -88,6 +88,8 @@ technical policy. Choose `accept` if a language reviewer should check them first
 Avoid editing the same entries while the batch runs: Tolgee's accept API has no
 atomic compare-and-set guard. The tool rechecks immediately before acceptance,
 verifies the result and stops on errors without retrying uncertain writes.
+Read-only requests limited with HTTP 429 wait for a bounded `Retry-After` before
+retrying (up to three attempts). Mutating requests are never automatically retried.
 
 For local use, supply the key through a private environment, not a command line
 or a committed file:
