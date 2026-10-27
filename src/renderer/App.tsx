@@ -3,9 +3,11 @@ import {
   ArrowDownToLine, Check, ChevronRight, CircleAlert, CircleUserRound,
   Clock3, Cog, Download, FolderOpen, Gamepad2, Github, HardDrive, Home, Library,
   LoaderCircle, LogIn, MoreHorizontal, PackageCheck, Pause, Play, Plus, RefreshCw, Rocket, Search, Settings2,
-  Store, Terminal, Trash2, UsersRound, X,
+  Store, Terminal, Trash2, UsersRound, PanelLeft, X,
 } from 'lucide-react';
 import type { AccountLibraryPage, AppSnapshot, CatalogProduct, CatalogSearchResult, DiagnosticLog, Game, GameContentPlan, GameLaunchOptions, Page, Settings, XboxProfileRequest } from '../shared/types';
+import {OverlayShortcutRecorder} from './OverlayShortcutRecorder';
+import {xboxOverlaySettings} from '../shared/xbox-overlay-settings';
 import { XboxSocial } from './XboxSocial';
 import './xbox-desktop-social.css';
 import { estimateTimeRemaining } from '../shared/utils';
@@ -878,6 +880,11 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
   let cacheLimitValid = true;
   try { shaderCacheLimits(form.shaderCacheLimitGiB ?? DEFAULT_SHADER_CACHE_GIB); } catch { cacheLimitValid = false; }
   const runtimeInfo = runtimeDisplay(data.runtime);
+  const overlay=xboxOverlaySettings(form);
+  const savedOverlay=xboxOverlaySettings(data.settings);
+  const overlayDirty=overlay.overlayEnabled!==savedOverlay.overlayEnabled||overlay.overlaySide!==savedOverlay.overlaySide||(form.overlayShortcut??savedOverlay.overlayShortcut)!==savedOverlay.overlayShortcut;
+  const shortcutState=data.overlayShortcut?.state;
+  const shortcutStatus=!savedOverlay.overlayEnabled?ui('settings.guide_shortcut_disabled'):shortcutState==='registered'?ui('settings.guide_shortcut_ready'):shortcutState==='unavailable'?data.overlayShortcut?.message??ui('settings.guide_shortcut_unavailable'):ui('settings.guide_shortcut_requested');
   return <main className="page settings-page">
     <header className="page-header"><div><h1>{ui("ui.settings_74a883a")}</h1><p>{ui("ui.account_backend_runtime_and_storage_11bda06")}</p></div></header>
 
@@ -944,6 +951,18 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
       </section>
       <section className="settings-card compact"><div className="settings-heading"><div className="settings-icon"><HardDrive /></div><div><h2>{ui("ui.storage_and_launch_paths_d3c8c4d")}</h2><p>{ui("ui.the_external_xodus_checkout_is_never_modified_b63317f")}</p></div></div><div className="form-grid"><label>{ui("ui.default_game_location_5e830cb")}<div className="input-action"><input value={form.installRoot} onChange={(event) => setForm({ ...form, installRoot: event.target.value })} /><button onClick={() => pick('install')}><FolderOpen /></button></div></label><label>{ui("ui.market_5238d9b")}<input value={form.market} onChange={(event) => setForm({ ...form, market: event.target.value })} /></label><label>{ui("ui.parallel_streams_e81513c")}<input type="number" min="1" max="16" value={form.parallelDownloads} onChange={(event) => setForm({ ...form, parallelDownloads: Number(event.target.value) })} /></label><label>{ui("ui.external_xodus_source_ef00493")}<div className="input-action"><input value={form.externalXodusRoot} onChange={(event) => setForm({ ...form, externalXodusRoot: event.target.value })} /><button onClick={() => pick('backend')}><FolderOpen /></button></div></label><label>{ui("ui.versioned_runtime_directory_3764480")}<div className="input-action"><input value={form.runtimeRoot} onChange={(event) => setForm({ ...form, runtimeRoot: event.target.value })} /><button onClick={() => pick('runtime')}><FolderOpen /></button></div></label><label>{ui("ui.wine_proton_binary_2b08a4a")}<div className="input-action"><input value={form.winePath} onChange={(event) => setForm({ ...form, winePath: event.target.value })} placeholder={ui("ui.selected_automatically_by_the_runtime_manager_0722211")} /><button onClick={() => pick('wine')}><FolderOpen /></button></div></label></div><div className="save-row"><span>{ui("ui.settings_are_stored_locally_in_electron_userdata_5ff2a49")}</span><button className="primary" disabled={busy === 'save'} onClick={() => invoke('save', () => window.launcher.updateSettings(form), ui("ui.settings_saved_ae493e2"))}>{busy === 'save' ? <LoaderCircle className="spin" /> : <Check />}{ui("ui.save_1509f56")}</button></div></section>
     </div>
+    <details className="settings-card settings-guide" aria-label={ui('settings.guide_title')}>
+      <summary><PanelLeft aria-hidden="true"/><span className="guide-summary-text"><strong>{ui('settings.guide_title')}</strong><small>{ui('settings.guide_summary')}</small></span><span className="guide-state">{savedOverlay.overlayEnabled?ui('settings.guide_on'):ui('settings.guide_off')}</span><ChevronRight aria-hidden="true"/></summary>
+      <div className="guide-settings-content">
+        <label className="guide-enable"><span><strong>{ui('settings.guide_enable')}</strong><small>{ui('settings.guide_enable_help')}</small></span><input type="checkbox" role="switch" checked={overlay.overlayEnabled} disabled={Boolean(busy)} onChange={event=>setForm({...form,overlayEnabled:event.target.checked})}/></label>
+        <fieldset className="guide-settings-fields" disabled={!overlay.overlayEnabled||Boolean(busy)}>
+          <legend className="social-sr-only">{ui('settings.guide_controls')}</legend>
+          <label htmlFor="guide-shortcut"><span>{ui('settings.guide_shortcut')}</span><OverlayShortcutRecorder value={form.overlayShortcut??'Super+G'} onChange={overlayShortcut=>setForm(current=>({...current,overlayShortcut}))}/></label>
+          <label htmlFor="guide-side"><span>{ui('settings.guide_side')}</span><select id="guide-side" value={overlay.overlaySide} onChange={event=>setForm({...form,overlaySide:event.target.value as 'left'|'right'})}><option value="left">{ui('settings.guide_left')}</option><option value="right">{ui('settings.guide_right')}</option></select><small>{ui('settings.guide_side_help')}</small></label>
+        </fieldset>
+        <div className="guide-settings-footer"><p role="status">{savedOverlay.overlayEnabled?<StatusDot tone={shortcutState==='registered'?'green':'amber'}/>:<span className="guide-disabled-dot" aria-hidden="true"/>}<span>{uiText(shortcutStatus)}</span></p><button className="secondary" disabled={Boolean(busy)||!overlayDirty} onClick={()=>invoke('save-overlay',()=>window.launcher.updateSettings({overlayEnabled:overlay.overlayEnabled,overlayShortcut:form.overlayShortcut??'Super+G',overlaySide:overlay.overlaySide}),ui('settings.guide_saved'))}>{busy==='save-overlay'?<LoaderCircle className="spin"/>:<Check/>}{ui('settings.guide_save')}</button></div>
+      </div>
+    </details>
     <details className="settings-card settings-diagnostics">
       <summary><Settings2 /><span>{ui("ui.advanced_diagnostics_2130ca1")}</span><ChevronRight /></summary>
       <div className="diagnostics-content">

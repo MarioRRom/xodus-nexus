@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { DownloadTask, Game, Settings } from '../shared/types.js';
 import { downloadLimitKiB } from '../shared/download-bandwidth.js';
+import {defaultXboxOverlay,xboxOverlaySettings,xboxOverlayPatch} from '../shared/xbox-overlay-settings.js';
 import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-cache.js';
 import { interfaceLanguagePreference } from '../shared/interface-language.js';
 import { resolvePackageFile } from './windows-path.js';
@@ -28,6 +29,7 @@ const defaultSettings: Settings = {
   externalXodusRoot: '',
   runtimeRoot: path.join(defaultDataRoot, 'runtimes'),
   verboseLogs: false,
+  ...defaultXboxOverlay,
 };
 
 export class StateStore {
@@ -59,7 +61,7 @@ export class StateStore {
             ...task, status: 'paused' as const, canPause: true, controlPending: false,
             transferRate: undefined, phase: 'Paused — resume to reconnect and restore saved download checkpoints',
           } : task) : [],
-        settings: Object.fromEntries(Object.entries({ ...defaultSettings, ...parsed.settings, downloadLimitMiB, shaderCacheLimitGiB, interfaceLanguage: interfaceLanguagePreference(parsed.settings?.interfaceLanguage) }).filter(([key]) => key !== 'separateGameProcess')) as unknown as Settings,
+        settings: Object.fromEntries(Object.entries({ ...defaultSettings, ...parsed.settings, ...xboxOverlaySettings(parsed.settings??{}), downloadLimitMiB, shaderCacheLimitGiB, interfaceLanguage: interfaceLanguagePreference(parsed.settings?.interfaceLanguage) }).filter(([key]) => key !== 'separateGameProcess')) as unknown as Settings,
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('State could not be loaded', error);
@@ -83,6 +85,7 @@ export class StateStore {
   }
 
   async setSettings(patch: Partial<Settings>): Promise<Settings> {
+    const overlay=xboxOverlayPatch(patch);patch={...patch,...overlay};
     if (patch.interfaceLanguage !== undefined && interfaceLanguagePreference(patch.interfaceLanguage) !== patch.interfaceLanguage) throw Error('Invalid interface language.');
     if (patch.downloadLimitMiB !== undefined) downloadLimitKiB(patch.downloadLimitMiB);
     if (patch.shaderCacheLimitGiB !== undefined) shaderCacheLimits(patch.shaderCacheLimitGiB);

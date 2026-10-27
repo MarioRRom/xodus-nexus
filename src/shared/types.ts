@@ -181,6 +181,9 @@ export interface Settings {
   externalXodusRoot: string;
   runtimeRoot: string;
   verboseLogs: boolean;
+  overlayEnabled?:boolean;
+  overlayShortcut?:string;
+  overlaySide?:'left'|'right';
   firstRunCompleted?: boolean;
 }
 
@@ -219,7 +222,9 @@ export interface KeyringStatus {
   message: string;
 }
 
+export interface LauncherApi {setXboxOverlayRecording(recording:boolean):Promise<void>;}
 export interface AppSnapshot {
+ overlayShortcut?:{state:'disabled'|'recording'|'requested'|'registered'|'unavailable';message?:string;backend?:string};
   social?: import('./game-invites.js').GameInviteState;
   backend: BackendStatus;
   runtime: RuntimeStatus;
