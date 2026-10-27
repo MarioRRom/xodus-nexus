@@ -402,6 +402,61 @@ export interface XboxConversation {
   unread: boolean;
   lastMessage: XboxMessage | null;
 }
+export interface XboxPartyState {
+  phase: 'idle' | 'connecting' | 'connected' | 'leaving' | 'error';
+  id?: string;
+  selfXuid?: string;
+  members: {xuid:string;role:string|null}[];
+  error?: string;
+}
+export interface XboxPartyAnswer { id:string;answer:{sdpType:'answer';sdp:string;iceCandidates:RTCIceCandidateInit[]} }
+export interface XboxInvite {
+  id:string;kind:'party'|'game';gamertag:string;sender:string;
+  expiresAt:number;sentAt:number|null;titleId:string|null;titleName:string|null;
+}
+export interface XboxVoiceApi {
+  getXboxParty(): Promise<XboxPartyState>;
+  startXboxParty(offer:string,partyId?:string): Promise<XboxPartyAnswer>;
+  getXboxActiveParties(): Promise<string[]>;
+  leaveExistingXboxParty(id:string): Promise<void>;
+  confirmXboxParty(id:string): Promise<void>;
+  leaveXboxParty(): Promise<void>;
+  inviteXboxPartyFriend(xuid:string): Promise<void>;
+  xboxVoiceAllowed(xuid:string): Promise<boolean>;
+  allowXboxMicrophone(): Promise<void>;
+  onXboxPartyState(callback:(state:XboxPartyState)=>void):()=>void;
+  getXboxInvites():Promise<XboxInvite[]>;
+  acceptXboxPartyInvite(offer:string,id:string):Promise<XboxPartyAnswer>;
+  onXboxInvitesChanged(callback:(invites:XboxInvite[])=>void):()=>void;
+}
+
+export interface XboxVoiceState {
+  connected:boolean;muted:boolean;audioBlocked:boolean;mutedMembers:string[];error?:string;
+}
+export type XboxVoiceCommand =
+  | {type:'start';partyId?:string}
+  | {type:'accept';inviteId:string}
+  | {type:'mute';xuid:string;muted:boolean}
+  | {type:'setMuted';muted:boolean}
+  | {type:'leave'}
+  | {type:'resume'};
+export interface XboxVoiceControlApi {
+  getXboxVoiceState():Promise<XboxVoiceState>;
+  onXboxVoiceState(callback:(state:XboxVoiceState)=>void):()=>void;
+  controlXboxVoice(command:XboxVoiceCommand):Promise<void>;
+}
+export interface XboxVoiceHostApi {
+  xboxVoiceHostReady():Promise<void>;
+  publishXboxVoiceHostState(state:XboxVoiceState):Promise<void>;
+  onXboxVoiceHostCommand(callback:(request:{id:string;command:XboxVoiceCommand})=>void):()=>void;
+  completeXboxVoiceHostCommand(id:string,error?:string):Promise<void>;
+}
+export type XboxPartyControlApi = Pick<XboxVoiceApi,
+  'getXboxParty'|'getXboxActiveParties'|'leaveExistingXboxParty'|'inviteXboxPartyFriend'|
+  'onXboxPartyState'|'getXboxInvites'|'onXboxInvitesChanged'> & XboxVoiceControlApi;
+
+
+export interface LauncherApi extends XboxVoiceApi,XboxVoiceControlApi,XboxVoiceHostApi {}
 export interface XboxSocialApi {
  openXboxPlayerProfile(xuid:string):Promise<void>;
  popOutXboxChat?(xuid:string):Promise<void>;

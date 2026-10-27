@@ -2,9 +2,10 @@ import {ui} from './i18n';
 import type {GameInviteState} from '../shared/game-invites';
 import {XboxRuntimeInvites,type RuntimeInviteApi} from './XboxRuntimeInvites';
 import {useEffect,useRef,useState} from 'react';
-import {ArrowLeft,ExternalLink,LoaderCircle,Plus} from 'lucide-react';
-import type {AuthStatus,XboxConversation,XboxFriend,XboxSocialApi,XboxProfileRequest} from '../shared/types';
+import {ArrowLeft,ExternalLink,Headset,LoaderCircle,Plus} from 'lucide-react';
+import type {AuthStatus,XboxConversation,XboxFriend,XboxSocialApi,XboxPartyControlApi,XboxProfileRequest} from '../shared/types';
 import {XboxChat} from './XboxChat';
+import {XboxPartyPanel} from './XboxPartyPanel';
 import {XboxPlayerCard} from './XboxPlayerCard';
 import {XboxAvatar,XboxGamertag} from './XboxAvatar';
 import {XboxSocialIcon} from './XboxSocialIcons';
@@ -14,13 +15,14 @@ import './xbox-social.css';
 
 const error=(value:unknown)=>value instanceof Error?value.message.replace(/^Error invoking remote method '[^']+': Error: /,''):'Xbox social is unavailable. Try again.';
 
-export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay,showProfile,expanded=false,runtimeInvites,runtimeApi}:{auth:AuthStatus;api:XboxSocialApi;overlay?:boolean;shelf?:boolean;close?:()=>void;openOverlay?:()=>void;showProfile?:XboxProfileRequest;expanded?:boolean;runtimeInvites?:GameInviteState;runtimeApi?:RuntimeInviteApi}){
- const [tab,setTab]=useState<'friends'|'chats'>('friends');
+export function XboxSocial({auth,api,voice,overlay=false,shelf=false,close,openOverlay,showProfile,expanded=false,runtimeInvites,runtimeApi}:{auth:AuthStatus;api:XboxSocialApi;voice?:XboxPartyControlApi;overlay?:boolean;shelf?:boolean;close?:()=>void;openOverlay?:()=>void;showProfile?:XboxProfileRequest;expanded?:boolean;runtimeInvites?:GameInviteState;runtimeApi?:RuntimeInviteApi}){
+ const [tab,setTab]=useState<'friends'|'chats'|'party'>('friends');
  const [friends,setFriends]=useState<XboxFriend[]>([]),[inbox,setInbox]=useState<XboxConversation[]>([]);
  const [selected,setSelected]=useState<string>();
  const [busy,setBusy]=useState(false),[problem,setProblem]=useState<string>();
  const [choosingChat,setChoosingChat]=useState(false);
  const [profile,setProfile]=useState<{xuid:string;request?:string}>();
+ const [partyRecipient,setPartyRecipient]=useState<{xuid:string;gamertag:string}>();
  const generation=useRef(0);
  const identity=auth.stored===true&&!auth.running?auth.username:undefined;
  const selectedPerson=friends.find(person=>person.xuid===selected);
@@ -28,7 +30,7 @@ export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay
  const selectedName=selectedPerson?.gamertag??selectedConversation?.gamertag??'Xbox player';
 
  useEffect(()=>{
-  generation.current++;setFriends([]);setInbox([]);setSelected(undefined);setProfile(showProfile?{xuid:showProfile.xuid}:undefined);setProblem(undefined);setBusy(false);
+  generation.current++;setFriends([]);setInbox([]);setSelected(undefined);setProfile(showProfile?{xuid:showProfile.xuid}:undefined);setProblem(undefined);setBusy(false);setPartyRecipient(undefined);
   return()=>{generation.current++;};
  },[identity]);
  useEffect(()=>{
@@ -60,7 +62,7 @@ export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay
  }
  useEffect(()=>{void refresh();},[identity,tab,selected,profile,choosingChat]);
  useEffect(()=>{
-  if(!identity||profile||selected)return;
+  if(!identity||tab==='party'||profile||selected)return;
   const timer=setInterval(()=>{if(document.visibilityState==='visible')void refresh();},tab==='chats'?20000:60000);
   return()=>clearInterval(timer);
  },[identity,tab,selected,profile,choosingChat]);
@@ -74,6 +76,7 @@ export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay
   </header>:null}
   {!identity?<p className="social-notice">{ui("social.sign_in_through_nexus_settings_to_load_friends_and_mess_134b98")}</p>:<>
    {!detail?<nav className="social-tabs" role="tablist" aria-label={ui("social.xbox_social_9dd063")}>
+    {voice?<button role="tab" aria-selected={tab==='party'} aria-label={ui("social.party_dfa82f")} title={ui("social.party_dfa82f")} onClick={()=>changeTab('party')}><Headset/></button>:null}
     <button role="tab" aria-selected={tab==='friends'} aria-label={ui("social.people_7db208")} title={ui("social.people_7db208")} onClick={()=>changeTab('friends')}><XboxSocialIcon name="people"/></button>
     <button role="tab" aria-selected={tab==='chats'} aria-label={ui("social.chats_ef5b40")} title={ui("social.chats_ef5b40")} onClick={()=>changeTab('chats')}><XboxSocialIcon name="chat"/></button>
     <button role="tab" aria-selected={false} aria-label={'Your Xbox profile'+(auth.gamertag?', '+auth.gamertag:'')} title={ui("social.your_xbox_profile_95979b")} onClick={()=>setProfile({xuid:'me'})}><XboxAvatar src={auth.avatarDataUrl} name={auth.gamertag}/></button>
@@ -83,14 +86,14 @@ export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay
     {profile?<XboxPlayerCard api={api} account={identity} expanded={expanded} xuid={profile.xuid} person={friends.find(p=>p.xuid===profile.xuid)} ownAvatar={profile.xuid==='me'?auth.avatarDataUrl:undefined} back={()=>closeProfile()} close={close}
      changed={()=>{const current=generation.current;void api.getXboxFriends().then(value=>{if(current===generation.current)setFriends(value);}).catch(()=>{});}}
      chat={()=>{const id=profile.xuid;closeProfile(false);chooseChat(id);}}
-     />:null}
+     party={voice?player=>{const id=profile.xuid;closeProfile(false);setSelected(undefined);setPartyRecipient({xuid:id,gamertag:player.gamertag});changeTab('party');}:undefined}/>:null}
     {selected?<div className="social-inline-chat" style={{display:profile?'none':'flex',flex:1,minHeight:0}}>
      <XboxChat api={api} account={identity} xuid={selected} displayName={selectedName} openProfile={id=>setProfile({xuid:id})}
       popOut={api.popOutXboxChat?()=>{void api.popOutXboxChat?.(selected).catch(e=>setProblem(error(e)));}:undefined}/>
     </div>:null}
     {!profile&&!selected&&(tab==='friends'||choosingChat)?<XboxPeopleBrowser key={identity} api={api} account={identity} friends={friends} friendsChanged={setFriends} choosingChat={choosingChat}
      openProfile={id=>{setProfile({xuid:id});setProblem(undefined);}} chooseChat={chooseChat}
-     />:null}
+     party={voice?person=>{setPartyRecipient({xuid:person.xuid,gamertag:person.gamertag});changeTab('party');}:undefined}/>:null}
     {!profile&&!selected&&!choosingChat&&tab==='chats'?<div className="social-chats-pane">
      <div className="social-page-heading"><h2>{ui("social.chats_ef5b40")}</h2><button className="social-circle-button" onClick={()=>{setChoosingChat(true);}} aria-label={ui("social.new_chat_db1838")} title={ui("social.new_chat_db1838")}><Plus/></button></div>
      <div className="social-inbox">{inbox.map(item=>{const recipient=item.participants.length===1?item.participants[0]:undefined;const person=friends.find(p=>p.xuid===recipient);const name=person?.gamertag??item.gamertag??'Xbox player';
@@ -98,6 +101,7 @@ export function XboxSocial({auth,api,overlay=false,shelf=false,close,openOverlay
        <XboxAvatar src={person?.avatarUrl??item.avatarUrl} name={name}/><span><strong><XboxGamertag name={name}/></strong><small>{item.lastMessage?.text||'No message preview'}</small></span>{item.unread?<span className="unread-dot" aria-label={ui("social.unread_1b9f38")}/>:null}
       </button>;})}</div>{!busy&&!problem&&!inbox.length?<p className="social-empty">{ui("social.no_conversations_in_your_primary_inbox_7a7411")}</p>:null}
     </div>:null}
+    {voice?<XboxPartyPanel api={voice} friends={friends} invitee={partyRecipient} hidden={tab!=='party'||Boolean(selected)||Boolean(profile)||choosingChat}/>:null}
     {problem?<p className="social-error" role="alert">{problem}</p>:null}
     {busy&&!profile&&!selected&&tab!=='friends'&&!choosingChat?<div className="social-loading" role="status"><LoaderCircle className="spin"/><span>{ui("ui.loading_ba3bbbe")}</span></div>:null}
    </div>

@@ -71,6 +71,10 @@ import { KeyringSupport } from './keyring.js';
 import { XboxSocialSessions } from './xbox-social.js';
 import { GameInviteBridge, combinedInviteState } from './game-invite-bridge.js';
 import {XboxTitlePresence} from './xbox-title-presence.js';
+import {XboxParty} from './xbox-party.js';
+import {XboxInvites} from './xbox-invites.js';
+import {XboxVoiceHost} from './xbox-voice-host.js';
+import type {XboxInvite,XboxVoiceCommand} from '../shared/types.js';
 import { WalletUnlocker } from './keyring-unlock.js';
 import { startSessionKeyring } from './keyring-session.js';
 import { showBeforeAccountCheck } from './launcher-startup.js';
@@ -96,6 +100,10 @@ function availableNativeInvite(){return [...gameInviteBridges.values()].find(bri
 
 const nativeSocialSenders:((event:Electron.IpcMainInvokeEvent)=>boolean)[]=[];
 const nativeSocialResets:(()=>void)[]=[];
+let xboxParty:XboxParty;
+let xboxInvites:XboxInvites;
+let voiceHost:XboxVoiceHost;
+let currentXboxInvites:XboxInvite[]=[];
 const nativeSocialBeforeAuth:(()=>Promise<void>)[]=[];
 const nativeSocialShutdown:(()=>Promise<void>)[]=[];
 const nativeSocialSnapshots:(()=>void)[]=[];
@@ -1287,6 +1295,19 @@ function registerDemoIpc(catalogMarket: () => string): void {
   ipcMain.handle('update-settings', (_event, patch: Partial<Settings>) => ({ ...snapshot().settings, ...patch }));
   ipcMain.handle('choose-directory', () => null);
   ipcMain.handle('choose-file', () => null);
+
+ const voiceSender=(event:Electron.IpcMainInvokeEvent)=>{if(!voiceHost.owns(event))throw Error('Party media must use the shared Nexus audio host.');};
+  ipcMain.handle('xbox-party-state',event=>{if(!voiceHost.owns(event))socialSender(event);return xboxParty.current;});
+  ipcMain.handle('xbox-party-start',(event,offer:string,partyId?:string)=>{voiceSender(event);return xboxParty.start(offer,partyId);});
+  ipcMain.handle('xbox-party-active',event=>{socialSender(event);return xboxParty.activeParties();});
+  ipcMain.handle('xbox-party-leave-existing',(event,id:string)=>{socialSender(event);return xboxParty.leaveExisting(id);});
+  ipcMain.handle('xbox-party-connected',(event,id:string)=>{voiceSender(event);xboxParty.connected(id);});
+  ipcMain.handle('xbox-party-leave',event=>{voiceSender(event);return xboxParty.leave();});
+  ipcMain.handle('xbox-party-invite',(event,xuid:string)=>{socialSender(event);return xboxParty.invite(xuid);});
+  ipcMain.handle('xbox-party-voice-policy',(event,xuid:string)=>{voiceSender(event);return xboxParty.voiceAllowed(xuid);});
+  ipcMain.handle('xbox-party-microphone',event=>{voiceSender(event);if(xboxParty.current.phase!=='connected')throw Error('Connect the Xbox party before enabling your microphone.');voiceHost.allowMicrophone();});
+  ipcMain.handle('xbox-party-accept',async(event,offer:string,id:string)=>{voiceSender(event);return xboxParty.accept(offer,await xboxInvites.partyHandle(id));});
+ ipcMain.handle('xbox-invites',async event=>{socialSender(event);return (await xboxInvites.list()).filter(invite=>invite.kind==='party');});
   ipcMain.handle('open-path', () => {});
 }
 
@@ -1712,6 +1733,19 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile'], defaultPath });
     return result.canceled ? null : result.filePaths[0];
   });
+
+ const voiceSender=(event:Electron.IpcMainInvokeEvent)=>{if(!voiceHost.owns(event))throw Error('Party media must use the shared Nexus audio host.');};
+  ipcMain.handle('xbox-party-state',event=>{if(!voiceHost.owns(event))socialSender(event);return xboxParty.current;});
+  ipcMain.handle('xbox-party-start',(event,offer:string,partyId?:string)=>{voiceSender(event);return xboxParty.start(offer,partyId);});
+  ipcMain.handle('xbox-party-active',event=>{socialSender(event);return xboxParty.activeParties();});
+  ipcMain.handle('xbox-party-leave-existing',(event,id:string)=>{socialSender(event);return xboxParty.leaveExisting(id);});
+  ipcMain.handle('xbox-party-connected',(event,id:string)=>{voiceSender(event);xboxParty.connected(id);});
+  ipcMain.handle('xbox-party-leave',event=>{voiceSender(event);return xboxParty.leave();});
+  ipcMain.handle('xbox-party-invite',(event,xuid:string)=>{socialSender(event);return xboxParty.invite(xuid);});
+  ipcMain.handle('xbox-party-voice-policy',(event,xuid:string)=>{voiceSender(event);return xboxParty.voiceAllowed(xuid);});
+  ipcMain.handle('xbox-party-microphone',event=>{voiceSender(event);if(xboxParty.current.phase!=='connected')throw Error('Connect the Xbox party before enabling your microphone.');voiceHost.allowMicrophone();});
+  ipcMain.handle('xbox-party-accept',async(event,offer:string,id:string)=>{voiceSender(event);return xboxParty.accept(offer,await xboxInvites.partyHandle(id));});
+ ipcMain.handle('xbox-invites',async event=>{socialSender(event);return (await xboxInvites.list()).filter(invite=>invite.kind==='party');});
   ipcMain.handle('open-path', async (_event, target: string) => {
     await fs.access(target);
     const error = await openDesktopTarget(target, () => shell.openPath(target));
@@ -1906,6 +1940,21 @@ app.whenReady().then(async () => {
   shortcutOnly = Boolean(startupRequest.gameId) && !demoMode;
   store = new StateStore(app.getPath('userData'));
   await store.load();
+  xboxParty=new XboxParty(nativeSocialConnection);
+  xboxInvites=new XboxInvites(nativeSocialConnection);
+  voiceHost=new XboxVoiceHost(__dirname,{
+   authorizeControl:event=>event.sender===mainWindow?.webContents&&event.senderFrame===event.sender.mainFrame,
+   stateChanged:state=>{mainWindow?.webContents.send('xbox-voice-state',state);app.emit('nexus-voice-state',state);},
+   leave:()=>xboxParty.leave(),settled:finishShortcutSession,
+  });
+  nativeSocialBeforeAuth.push(()=>xboxParty.leave());
+  nativeSocialResets.push(()=>{voiceHost.reset();xboxParty.suspend();xboxInvites.clear();});
+  nativeSocialKeepAlive.push(()=>voiceHost.busy||xboxParty.active||Boolean(xboxParty.current.id));
+  xboxParty.on('state',state=>{mainWindow?.webContents.send('xbox-party-state',state);voiceHost.contents?.send('xbox-party-state',state);app.emit('nexus-party-state',state);if(state.phase==='idle')finishShortcutSession();});
+  xboxInvites.on('change',invites=>{currentXboxInvites=invites.filter((invite:XboxInvite)=>invite.kind==='party');mainWindow?.webContents.send('xbox-invites',currentXboxInvites);app.emit('nexus-party-invites',currentXboxInvites);});
+  const partyInvitesTimer=setInterval(()=>{if(nativeSocialConnection())void xboxInvites.list().catch(()=>{});},30000);partyInvitesTimer.unref();
+  nativeSocialShutdown.push(async()=>{clearInterval(partyInvitesTimer);await voiceHost.shutdown();});
+
   downloadCleanup = new DownloadCleanup(app.getPath('userData'));
   accountProfile = new AccountProfile(app.getPath('userData'), scheduleSnapshot, dataUrl => {
     try {
