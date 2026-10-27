@@ -6,6 +6,7 @@ import type { Game, InstallRequest, LauncherApi, Settings, XboxSocialApi } from 
 // preload stays a thin passthrough. Store pages always use the live
 // Microsoft Store catalog. No real credentials, tokens or account data.
 const nativeSocial:XboxSocialApi={
+ popOutXboxChat:xuid=>ipcRenderer.invoke('pop-out-xbox-chat',xuid),
  openXboxPlayerProfile:xuid=>ipcRenderer.invoke('open-xbox-player-profile',xuid),
  getXboxGameInviteAvailability:()=>ipcRenderer.invoke('xbox-game-invite-availability'),
  sendXboxGameInvite:xuid=>ipcRenderer.invoke('xbox-game-invite-send',xuid),  getXboxPlayerDetails:xuid=>ipcRenderer.invoke('xbox-player-details',xuid),
@@ -23,6 +24,7 @@ const api: LauncherApi = {
  getXboxDesktopProfile:()=>ipcRenderer.invoke('xbox-desktop-profile'),
  onXboxDesktopProfile:callback=>{const listener=(_event:Electron.IpcRendererEvent,request:Parameters<typeof callback>[0])=>callback(request);ipcRenderer.on('xbox-desktop-profile',listener);return()=>ipcRenderer.removeListener('xbox-desktop-profile',listener);},
   nativeSocial,
+ closeXboxChat:()=>ipcRenderer.invoke('close-xbox-chat'),
   inviteXboxFriend:(gameId,xuid)=>ipcRenderer.invoke('game-invite-friend',gameId,xuid),
   chooseGameInviteRecipient: (id,xuid) => ipcRenderer.invoke('game-invite-choose',id,xuid),
   cancelGameInvite: id => ipcRenderer.invoke('game-invite-cancel',id),

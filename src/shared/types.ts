@@ -426,6 +426,7 @@ export interface XboxMessageReceipt {id:string}
 
 export interface XboxGameInviteAvailability {canInvite:boolean;gameId?:string;title?:string;reason?:string}
 export interface LauncherApi {
+ closeXboxChat():Promise<void>;
  getXboxDesktopProfile():Promise<XboxProfileRequest|undefined>;
  onXboxDesktopProfile(callback:(request:XboxProfileRequest|undefined)=>void):()=>void;
 
