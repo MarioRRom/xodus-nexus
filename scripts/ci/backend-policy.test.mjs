@@ -28,6 +28,22 @@ test('manifest-selected plain package executables keep licensing and encrypted-l
   assert.doesNotMatch(added,/get_license|tokens\.|full_key|Command::|set_permissions|mount_mem_fd|\.unpack\(/);
 });
 
+test('launch views left by killed sessions are swept only when no process holds their lock',async()=>{
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-launch-view-sweep.patch');assert.ok(entry);
+  assert.ok(lock.patches.findIndex(value=>value.file===entry.file)>lock.patches.findIndex(value=>value.file==='xodus-launch-filesystem.patch'));
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/run.rs']);
+  for(const name of ['launch_view_sweep_removes_views_whose_session_is_gone','launch_view_lock_is_inherited_by_the_game',
+    'launch_view_sweep_skips_locks_that_are_not_files','launch_view_sweep_keeps_views_a_running_session_holds',
+    'launch_view_sweep_removes_unlocked_views_only_once_old'])assert.ok(patch.includes(name),name);
+  const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.match(added,/try_lock_exclusive/);
+  assert.match(added,/OFlags::NOFOLLOW \| rustix::fs::OFlags::NONBLOCK/);
+  assert.doesNotMatch(added,/get_license|tokens\.|full_key|set_permissions|mount\(|chmod/);
+});
+
 test('launch views require actual symbolic-link support and fall back only once (#341)',async()=>{
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(value=>value.file==='xodus-launch-filesystem.patch');assert.ok(entry);
