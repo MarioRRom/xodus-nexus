@@ -41,7 +41,7 @@ import { DownloadProgress, PROGRESS_PREFIX } from './download-progress.js';
 import { DownloadCleanup } from './download-cleanup.js';
 import { InstallQueue, assertActivityCompatible, assertInstallDestination, canonicalInstallPath, installPathsOverlap } from './install-queue.js';
 import { GameDisplayBlocker } from './game-display.js';
-import { GameShortcuts, shortcutArguments, shortcutInstanceData, shortcutInstanceRequest, type ShortcutDestination } from './game-shortcuts.js';
+import { GameShortcuts, shortcutArguments, shortcutInstanceData, shortcutInstanceRequest, shortcutLauncherPath, type ShortcutDestination } from './game-shortcuts.js';
 import { ShortcutLaunch } from './shortcut-launch.js';
 import { loadShortcutIcon } from './shortcut-icon.js';
 import { AccountProfile } from './account-profile.js';
@@ -1874,7 +1874,7 @@ app.whenReady().then(async () => {
   const persistentBinary = app.isPackaged && !process.env.APPDIR && !process.execPath.includes('/.mount_')
     ? (path.basename(process.execPath) === 'xodus-nexus.bin' ? path.join(path.dirname(process.execPath), 'xodus-nexus') : process.execPath) : undefined;
   shortcuts = new GameShortcuts({ userData: app.getPath('userData'), desktop: app.getPath('desktop'),
-    applications: path.join(dataHome, 'applications'), launcher: appImage ?? persistentBinary,
+    applications: path.join(dataHome, 'applications'), launcher: appImage ? await shortcutLauncherPath(appImage,process.env.ARGV0) : persistentBinary,
     icon: fileURLToPath(new URL('../../assets/icon.png', import.meta.url)) });
   if (!demoMode) await shortcuts.initialize().catch((error) => console.error('Game shortcut integration unavailable:', error));
   if (demoMode) {
