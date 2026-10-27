@@ -10,7 +10,7 @@ const languages = [{ id: 1, tag: 'en', base: true }, { id: 2, tag: 'fr', base: f
 const suggestion = () => ({ id: 40, languageId: 2, keyId: 10, translation: 'Annuler {game} ?', isPlural: false, state: 'ACTIVE' });
 const cell = () => ({ id: 20, text: null, state: 'UNTRANSLATED', outdated: false, unresolvedCommentCount: 0, qaIssueCount: 0,
   activeSuggestionCount: 1, suggestions: [suggestion()] });
-const row = () => ({ keyId: 10, keyName: 'common.cancel_game', keyIsPlural: false, keyNamespace: null, branch: null,
+const row = () => ({ keyId: 10, keyName: 'common.cancel_game', keyIsPlural: false, keyNamespace: null, branch: 'main',
   translations: { en: { text: 'Cancel {game}?' }, fr: cell(), es: { ...cell(), activeSuggestionCount: 0, suggestions: [] } } });
 const page = (collection, rows, number = 0, totalPages = 1) => ({ _embedded: { [collection]: rows }, page: { number, totalPages, totalElements: rows.length } });
 const clone = value => structuredClone(value);
@@ -68,6 +68,19 @@ test('eligible French placeholder and Spanish text are accepted by the technical
 test('protect base English and English variants even if their metadata claims otherwise', () => {
   assert.equal(assess(row(), languages[0], english).reason, 'protected-source');
   assert.equal(assess(row(), { tag: 'en-GB', base: false }, english).reason, 'protected-source');
+});
+
+test('standard main and legacy branchless keys work, arbitrary branches and namespaces stay protected', () => {
+  const value = row();
+  assert.equal(assess(value, languages[1], english).reason, 'eligible');
+  value.branch = null;
+  assert.equal(assess(value, languages[1], english).reason, 'eligible');
+  value.branch = 'feature';
+  assert.equal(assess(value, languages[1], english).reason, 'unsupported-branch');
+  value.branch = 'main'; value.keyNamespace = 'other';
+  assert.equal(assess(value, languages[1], english).reason, 'nondefault-namespace');
+  value.keyNamespace = null; value.keyName = 'unknown';
+  assert.equal(assess(value, languages[1], english).reason, 'unknown-key');
 });
 
 test('skip existing, flagged, plural, unknown and competing translations', () => {
@@ -149,6 +162,8 @@ test('changed cells or changed source before accept are skipped without any muta
     value => { value.translations.fr.text = 'Another reviewer'; },
     value => { value.translations.en.text = 'New source {game}'; },
     value => { value.translations.fr.suggestions[0].translation = 'Autre texte {game}'; },
+    value => { value.branch = null; },
+    value => { value.branch = 'feature'; },
   ]) {
     const { api, calls } = fixture({ beforeView: (value, reads) => { if (reads === 2) change(value); } });
     const report = await acceptSuggestions({ api, english, apply: true });
