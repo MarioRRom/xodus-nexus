@@ -1,5 +1,5 @@
 diff --git a/crates/xodus-cli/src/commands/run.rs b/crates/xodus-cli/src/commands/run.rs
-index 1ec9cb9..1dca581 100644
+index 1ec9cb9..ba6ca4d 100644
 --- a/crates/xodus-cli/src/commands/run.rs
 +++ b/crates/xodus-cli/src/commands/run.rs
 @@ -37,6 +37,145 @@ async fn playfab_auth_header(client: &reqwest::Client, tokens: &TokenManager) ->
@@ -148,23 +148,26 @@ index 1ec9cb9..1dca581 100644
  
  fn launch_image_error(name: &str, operation: &str, error: std::io::Error) -> std::io::Error {
      let shown: String = name.chars().take(240).collect();
-@@ -291,15 +430,24 @@ fn launch_view_directory_with(
+@@ -291,15 +430,27 @@ fn launch_view_directory_with(
      Ok(directory)
  }
  
 -fn launch_view_directory(source_root: &Path, prefix: &str) -> std::io::Result<TempDir> {
 -    launch_view_directory_with(source_root, &std::env::temp_dir(), prefix, probe_launch_view_links)
-+fn launch_view_directory(source_root: &Path, prefix: &str) -> std::io::Result<LaunchView> {
-+    let fallback = std::env::temp_dir();
-+    let parent = source_root.parent().unwrap_or(&fallback);
++fn swept_launch_view(source_root: &Path, fallback: &Path, prefix: &str) -> std::io::Result<LaunchView> {
++    let parent = source_root.parent().unwrap_or(fallback);
 +    sweep_and_report(parent);
-+    let view = LaunchView::new(launch_view_directory_with(source_root, &fallback, prefix, probe_launch_view_links)?);
++    let view = LaunchView::new(launch_view_directory_with(source_root, fallback, prefix, probe_launch_view_links)?);
 +    // A view that fell back to the temp dir is locked before that dir is
 +    // swept, so the sweep keeps it.
 +    if view.path().parent() != Some(parent) {
-+        sweep_and_report(&fallback);
++        sweep_and_report(fallback);
 +    }
 +    Ok(view)
++}
++
++fn launch_view_directory(source_root: &Path, prefix: &str) -> std::io::Result<LaunchView> {
++    swept_launch_view(source_root, &std::env::temp_dir(), prefix)
  }
  
  fn create_launch_chain_mirror(
@@ -176,7 +179,7 @@ index 1ec9cb9..1dca581 100644
      let entry_path = checked_relative_path(entry_suffix)?;
      let mut decrypted = HashMap::new();
      for (name, fd) in fds {
-@@ -345,7 +493,7 @@ fn create_launch_chain_mirror(
+@@ -345,7 +496,7 @@ fn create_launch_chain_mirror(
  fn create_launch_mirror(
      source_root: &Path,
      entry_suffix: &str,
@@ -185,7 +188,7 @@ index 1ec9cb9..1dca581 100644
      let mirror = launch_view_directory(source_root, ".xodus-offline-")?;
      let components: Vec<&str> = entry_suffix
          .split(['\\', '/'])
-@@ -903,6 +1051,91 @@ mod tests {
+@@ -903,6 +1054,119 @@ mod tests {
          image
      }
  
@@ -248,6 +251,34 @@ index 1ec9cb9..1dca581 100644
 +        drop(other);
 +        assert!(!live_path.exists() && !launch_view_lock_path(&live_path).exists());
 +        assert!(!other_path.exists() && !launch_view_lock_path(&other_path).exists());
++    }
++
++    #[test]
++    fn launch_view_sweep_cleans_the_temp_dir_fallback() {
++        let root = tempfile::tempdir().unwrap();
++        let fallback = tempfile::tempdir().unwrap();
++        let stale = fallback.path().join("xodus-chain-killed");
++        std::fs::create_dir(&stale).unwrap();
++        std::fs::write(launch_view_lock_path(&stale), b"").unwrap();
++        // The install parent does not exist, so the view falls back.
++        let view = swept_launch_view(&root.path().join("missing").join("game"), fallback.path(), ".xodus-chain-").unwrap();
++        assert_eq!(view.path().parent(), Some(fallback.path()));
++        assert!(!stale.exists() && !launch_view_lock_path(&stale).exists());
++        assert!(view.path().exists() && launch_view_lock_path(view.path()).exists());
++    }
++
++    #[test]
++    fn launch_view_sweep_keeps_orphan_locks_still_held() {
++        let root = tempfile::tempdir().unwrap();
++        let orphan = root.path().join(".xodus-chain-orphan.lock");
++        std::fs::write(&orphan, b"").unwrap();
++        let holder = std::fs::File::open(&orphan).unwrap();
++        fs2::FileExt::lock_exclusive(&holder).unwrap();
++        assert_eq!(sweep_stale_launch_views(root.path()), 0);
++        assert!(orphan.exists());
++        drop(holder);
++        assert_eq!(sweep_stale_launch_views(root.path()), 0);
++        assert!(!orphan.exists());
 +    }
 +
 +    #[test]

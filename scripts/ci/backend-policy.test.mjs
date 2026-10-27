@@ -37,7 +37,8 @@ test('launch views left by killed sessions are swept only when no process holds 
   assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/run.rs']);
   for(const name of ['launch_view_sweep_removes_views_whose_session_is_gone','launch_view_lock_is_inherited_by_the_game',
     'launch_view_sweep_skips_locks_that_are_not_files','launch_view_sweep_keeps_views_a_running_session_holds',
-    'launch_view_sweep_removes_unlocked_views_only_once_old'])assert.ok(patch.includes(name),name);
+    'launch_view_sweep_removes_unlocked_views_only_once_old',
+    'launch_view_sweep_cleans_the_temp_dir_fallback','launch_view_sweep_keeps_orphan_locks_still_held'])assert.ok(patch.includes(name),name);
   const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
   assert.match(added,/try_lock_exclusive/);
   assert.match(added,/OFlags::NOFOLLOW \| rustix::fs::OFlags::NONBLOCK/);
