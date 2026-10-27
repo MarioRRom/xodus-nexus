@@ -5,6 +5,7 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {PanelLeftClose,PanelRightClose} from 'lucide-react';
 import type {AuthStatus,XboxProfileRequest} from '../shared/types';
+import {guidePartyApi} from './guide-party-api';
 import {XboxSocial} from './XboxSocial';
 import {XboxOverlayChat} from './XboxOverlayChat';
 import {connectGuideEvents,guideApi,guideRpc,onGuideAuth,onGuideEvent} from './xbox-guide-api';
@@ -40,7 +41,7 @@ function XboxGameGuide(){
  return <main className={'game-guide-shell'+(overlay.overlaySide==='right'?' is-right':'')} aria-label={ui("social.in_game_xbox_guide_b68219")}>
   <div className={'game-guide-panel'+(expanded?' is-expanded':'')}>
    {expanded?<div className="game-guide-full-toolbar"><button onClick={()=>setExpanded(false)}>{overlay.overlaySide==='right'?<PanelRightClose/>:<PanelLeftClose/>}{ui("social.return_to_shelf_4df4fc")}</button><span>{ui("social.xbox_social_9dd063")}</span></div>:null}
-   <XboxSocial key={auth.username} auth={auth} api={api} runtimeInvites={runtimeInvites} runtimeApi={runtimeApi} overlay expanded={expanded} showProfile={profile} close={close}/>
+   <XboxSocial key={auth.username} auth={auth} api={api} voice={guidePartyApi} runtimeInvites={runtimeInvites} runtimeApi={runtimeApi} overlay expanded={expanded} showProfile={profile} close={close}/>
    {problem?<p className="game-guide-error" role="alert">{problem}</p>:null}
    <footer><span>{ui("social.xbox_guide_31c52d")}</span><span>{overlay.overlayShortcut} {ui("social._esc_back_to_game_a58ed5")}</span></footer>
   </div><button className="game-guide-dismiss" aria-label={ui("social.return_to_game_1d6ce9")} onClick={close}/>
