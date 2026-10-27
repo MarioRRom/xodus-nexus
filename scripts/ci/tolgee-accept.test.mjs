@@ -157,6 +157,31 @@ test('accept without reviewed flag leaves accepted translations for language rev
   assert.equal(calls.filter(call => call.method === 'PUT').length, 1);
 });
 
+test('opt-in review snapshot exports only public UI pairs and binds approval to their digest', async () => {
+  const preview = fixture();
+  const report = await acceptSuggestions({ api: preview.api, english, texts: true });
+  assert.deepEqual(report.reviewSnapshot, [{ language: 'fr', key: 'common.cancel_game', source: 'Cancel {{game}}?', translation: 'Annuler {{game}} ?' }]);
+  assert.match(report.reviewDigest, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(report.reviewSnapshot), /author|languageId|keyId|suggestionId/);
+  const actual = fixture();
+  assert.equal((await acceptSuggestions({ api: actual.api, english, apply: true, reviewed: true, reviewDigest: report.reviewDigest })).reviewed, 1);
+  const changed = fixture({ beforeView: value => { value.translations.fr.suggestions[0].translation = 'Ignorer {game} ?'; } });
+  await assert.rejects(acceptSuggestions({ api: changed.api, english, apply: true, reviewDigest: report.reviewDigest }), /changed since/);
+  assert.ok(changed.calls.every(call => call.method === 'GET'));
+});
+
+test('language-review exclusions are validated and never accepted or reviewed', async () => {
+  const { api, calls } = fixture();
+  const report = await acceptSuggestions({ api, english, apply: true, reviewed: true, exclude: ['fr:common.cancel_game'] });
+  assert.equal(report.accepted, 0); assert.equal(report.reviewed, 0);
+  assert.equal(report.entries[0].status, 'excluded-by-language-review');
+  assert.ok(calls.every(call => call.method === 'GET'));
+  for (const exclude of [['en:common.cancel_game'], ['fr:unknown'], ['fr:common.cancel_game:other']]) {
+    await assert.rejects(acceptSuggestions({ api: fixture().api, english, apply: true, exclude }));
+  }
+  await assert.rejects(acceptSuggestions({ api: fixture().api, english, apply: true, texts: true }));
+});
+
 test('changed cells or changed source before accept are skipped without any mutation', async () => {
   for (const change of [
     value => { value.translations.fr.text = 'Another reviewer'; },
@@ -274,6 +299,9 @@ test('CLI is default preview, unknown/duplicate/injected flags fail closed', () 
   assert.deepEqual(argumentsFor([]), { apply: false, reviewed: false, tags: [] });
   assert.deepEqual(argumentsFor(['--apply', '--reviewed', '--languages', 'fr,es']), { apply: true, reviewed: true, tags: ['fr', 'es'] });
   for (const args of [['--reviewed'], ['--apply', '--apply'], ['--languages'], ['--languages', 'fr,fr'], ['--languages', 'fr;echo bad'], ['--host', 'https://evil.example']]) assert.throws(() => argumentsFor(args));
+  assert.equal(argumentsFor(['--texts']).texts, true);
+  assert.deepEqual(argumentsFor(['--exclude', 'fr:auth.browser']).exclude, ['fr:auth.browser']);
+  for (const args of [['--texts', '--apply'], ['--exclude', 'bad'], ['--review-digest', 'bad']]) assert.throws(() => argumentsFor(args));
 });
 
 test('workflow is main-only manual, serializes source sync, isolates review secret and never releases or pushes', async () => {

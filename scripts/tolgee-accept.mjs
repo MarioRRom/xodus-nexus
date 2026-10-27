@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { parseCatalog } from './localization.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -126,8 +127,10 @@ function viewRoute(tags, keyId) {
   return `${project}/translations?${query}`;
 }
 
-export async function acceptSuggestions({ api, english, apply = false, reviewed = false, tags = [], report = {} }) {
+export async function acceptSuggestions({ api, english, apply = false, reviewed = false, tags = [], report = {}, texts = false, exclude = [], reviewDigest }) {
   if (reviewed && !apply) throw Error('Reviewed mode requires explicit apply.');
+  if (texts && apply) throw Error('Text snapshots are preview-only.');
+  if (reviewDigest !== undefined && !/^[a-f0-9]{64}$/.test(reviewDigest)) throw Error('Invalid review digest.');
   Object.assign(report, { project: 36162, mode: apply ? reviewed ? 'accept-and-review' : 'accept' : 'preview',
     linguisticReview: false, entries: [], accepted: 0, reviewed: 0 });
   const languages = await pages(api, `${project}/languages`, 'languages', 200);
@@ -136,6 +139,10 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
   for (const tag of tags) if (!canonical(tag) || /^en(?:-|$)/i.test(tag) || !languages.some(value => value.tag === tag)) throw Error('Invalid target language.');
   const targets = languages.filter(value => !value.base && !/^en(?:-|$)/i.test(value.tag) && (!tags.length || tags.includes(value.tag)));
   if (!targets.length) throw Error('No target languages selected.');
+  for (const value of exclude) {
+    const [tag, key, extra] = value.split(':');
+    if (extra !== undefined || !targets.some(language => language.tag === tag) || !own(english, key)) throw Error('Invalid review exclusion.');
+  }
   // Snapshot all pages before mutation, never paginate a shrinking suggestion filter.
   const rows = await pages(api, viewRoute(['en', ...targets.map(value => value.tag)]), 'keys', 10000);
   const pending = [];
@@ -147,8 +154,17 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
     report.entries.push(entry);
     if (decision.reason === 'eligible') pending.push({ row, language, decision, entry });
   }
+  const snapshot = pending.map(({ row, language, decision }) => ({ language: language.tag, key: row.keyName,
+    source: english[row.keyName], translation: decision.translated }))
+    .sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0);
+  report.reviewDigest = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+  if (texts) report.reviewSnapshot = snapshot;
+  if (reviewDigest !== undefined && report.reviewDigest !== reviewDigest) throw Error('Suggestions changed since the language review. No writes performed.');
+  const excluded = new Set(exclude);
+  for (const { language, row, entry } of pending) if (excluded.has(`${language.tag}:${row.keyName}`)) entry.status = 'excluded-by-language-review';
   if (!apply) return report;
   for (const { row, language, decision, entry } of pending) {
+    if (entry.status === 'excluded-by-language-review') continue;
     // Tolgee has no conditional/transactional accept endpoint. Minimize, but cannot
     // eliminate, races with a human editing the same translation during this run.
     const fresh = await pages(api, viewRoute(['en', language.tag], row.keyId), 'keys', 1);
@@ -188,12 +204,21 @@ export function argumentsFor(argv) {
     seen.add(option);
     if (option === '--apply') result.apply = true;
     else if (option === '--reviewed') result.reviewed = true;
+    else if (option === '--texts') result.texts = true;
+    else if (option === '--review-digest') {
+      result.reviewDigest = argv[++index];
+      if (!/^[a-f0-9]{64}$/.test(result.reviewDigest ?? '')) throw Error('Invalid review digest.');
+    } else if (option === '--exclude') {
+      result.exclude = (argv[++index] ?? '').split(',');
+      if (!result.exclude.every(value => /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*:[a-z][a-zA-Z0-9_.]*$/.test(value))) throw Error('Invalid review exclusions.');
+    }
     else if (option === '--languages') {
       result.tags = (argv[++index] ?? '').split(',');
       if (!result.tags.every(canonical) || new Set(result.tags).size !== result.tags.length) throw Error('Invalid languages.');
     } else throw Error('Usage: npm run i18n:accept -- [--languages fr,es] [--apply [--reviewed]]');
   }
   if (result.reviewed && !result.apply) throw Error('--reviewed requires --apply.');
+  if (result.texts && result.apply) throw Error('--texts is preview-only.');
   return result;
 }
 
