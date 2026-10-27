@@ -1,4 +1,4 @@
-export type Page = 'home' | 'store' | 'library' | 'downloads' | 'settings';
+export type Page = 'home' | 'store' | 'library' | 'downloads' | 'settings' | 'social';
 
 export interface BackendCapabilities {
   commands: string[];
@@ -403,6 +403,14 @@ export interface XboxConversation {
   lastMessage: XboxMessage | null;
 }
 export interface XboxSocialApi {
+ openXboxPlayerProfile(xuid:string):Promise<void>;
+ popOutXboxChat?(xuid:string):Promise<void>;
+ getXboxProfileRequest?():Promise<XboxProfileRequest|undefined>;
+ onXboxProfileRequest?(callback:(request:XboxProfileRequest|undefined)=>void):()=>void;
+ completeXboxProfileRequest?(id:string,hide?:boolean):Promise<void>;
+ getXboxGameInviteAvailability():Promise<XboxGameInviteAvailability>;
+ sendXboxGameInvite(xuid:string):Promise<void>;
+
  getXboxPlayerDetails(xuid:string):Promise<XboxPlayerDetails>;
  getXboxPlayerGames(xuid:string):Promise<XboxProfileGames>;
  getXboxPeople(list:XboxPeopleList,query?:string):Promise<XboxPeoplePage>;
@@ -416,7 +424,11 @@ export interface XboxSocialApi {
 }
 export interface XboxMessageReceipt {id:string}
 
+export interface XboxGameInviteAvailability {canInvite:boolean;gameId?:string;title?:string;reason?:string}
 export interface LauncherApi {
+ getXboxDesktopProfile():Promise<XboxProfileRequest|undefined>;
+ onXboxDesktopProfile(callback:(request:XboxProfileRequest|undefined)=>void):()=>void;
+
   nativeSocial:XboxSocialApi;
   inviteXboxFriend(gameId:string,xuid:string):Promise<void>;
   chooseGameInviteRecipient(id: string, xuid: string): Promise<void>;

@@ -1,3 +1,4 @@
+import type {XboxProfileRequest} from '../shared/types.js';
 import {XboxSocial as NativeXboxSocial} from './xbox-native-social.js';
 import {resetSocialTransport} from './xbox-social-transport.js';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
@@ -88,6 +89,11 @@ const downloadNotifications = new DownloadCompletionNotifications({
 });
 let mainWindow: BrowserWindow | null = null;
 let xboxNativeSocial:NativeXboxSocial;
+let desktopProfileRequest:XboxProfileRequest|undefined;
+const nativeSocialKeepAlive:(()=>boolean)[]=[];
+function clearDesktopProfile(){desktopProfileRequest=undefined;mainWindow?.webContents.send('xbox-desktop-profile',undefined);}
+function availableNativeInvite(){return [...gameInviteBridges.values()].find(bridge=>bridge.state().active.length);}
+
 const nativeSocialSenders:((event:Electron.IpcMainInvokeEvent)=>boolean)[]=[];
 const nativeSocialResets:(()=>void)[]=[];
 const nativeSocialBeforeAuth:(()=>Promise<void>)[]=[];
@@ -222,7 +228,7 @@ async function shortcutError(error: unknown): Promise<void> {
 }
 function finishShortcutSession(): void {
   // Account service and game-process cleanup must finish before normal quit.
-  if (shortcutOnly && !shortcutLaunch.preparing && !preparingLaunch && !finalizingGame && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0) app.quit();
+  if (launchReady && (shortcutOnly || !mainWindow || mainWindow.isDestroyed()) && !nativeSocialKeepAlive.some(active=>active()) && !shortcutLaunch.preparing && !preparingLaunch && !finalizingGame && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0) app.quit();
 }
 function receiveLaunchRequest(id?: string): void {
   if (!launchReady) { pendingRequests.push(id); return; }
@@ -1289,6 +1295,17 @@ function socialSender(event:Electron.IpcMainInvokeEvent):void{
  if(!backend.current.capabilities.nativeSocial)throw Error('Update the backend to enable native Social.');
 }
 function registerIpc(): void {
+  ipcMain.handle('open-xbox-player-profile',async(event,value:unknown)=>{
+    socialSender(event);
+    if(typeof value!=='string'||value!=='me'&&(!/^[1-9][0-9]{0,19}$/.test(value)||BigInt(value)>18446744073709551615n))throw Error('Invalid Xbox player profile.');
+    desktopProfileRequest={id:randomUUID(),xuid:value};await showLauncher();
+    mainWindow?.webContents.send('xbox-desktop-profile',desktopProfileRequest);
+  });
+  ipcMain.handle('xbox-desktop-profile',event=>{socialSender(event);return event.sender===mainWindow?.webContents?desktopProfileRequest:undefined;});
+
+ ipcMain.handle('xbox-game-invite-availability',event=>{socialSender(event);const bridge=availableNativeInvite();return bridge?{canInvite:true,gameId:bridge.id,title:bridge.game}:{canInvite:false,reason:'Start an online game session to invite someone.'};});
+ ipcMain.handle('xbox-game-invite-send',(event,xuid:string)=>{socialSender(event);const bridge=availableNativeInvite();if(!bridge)throw Error('Start an online game session to invite someone.');bridge.invite(xuid);});
+
   ipcMain.handle('xbox-player-details',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.details(xuid);});
   ipcMain.handle('xbox-player-games',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.games(xuid);});
   ipcMain.handle('xbox-social-people',(event,list:Parameters<NativeXboxSocial['people']>[0],query?:string)=>{socialSender(event);return xboxNativeSocial.people(list,query);});
@@ -1879,6 +1896,7 @@ app.whenReady().then(async () => {
   if (!primaryInstance) return;
   if (startupError) { dialog.showErrorBox(nativeText('Invalid Nexus shortcut'), startupError.message); app.quit(); return; }
   xboxNativeSocial=new NativeXboxSocial(nativeSocialConnection);
+  nativeSocialResets.push(clearDesktopProfile);
   if (!demoMode) {
     backendDiagnostics = new BackendDiagnostics(app.getPath('userData'), () => ({
       launcher: app.getVersion(), backend: backend?.current.version, source: backend?.current.source,

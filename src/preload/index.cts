@@ -5,7 +5,10 @@ import type { Game, InstallRequest, LauncherApi, Settings, XboxSocialApi } from 
 // served over these same IPC channels when XODUS_DEMO=1, so the sandboxed
 // preload stays a thin passthrough. Store pages always use the live
 // Microsoft Store catalog. No real credentials, tokens or account data.
-const nativeSocial:XboxSocialApi={  getXboxPlayerDetails:xuid=>ipcRenderer.invoke('xbox-player-details',xuid),
+const nativeSocial:XboxSocialApi={
+ openXboxPlayerProfile:xuid=>ipcRenderer.invoke('open-xbox-player-profile',xuid),
+ getXboxGameInviteAvailability:()=>ipcRenderer.invoke('xbox-game-invite-availability'),
+ sendXboxGameInvite:xuid=>ipcRenderer.invoke('xbox-game-invite-send',xuid),  getXboxPlayerDetails:xuid=>ipcRenderer.invoke('xbox-player-details',xuid),
   getXboxPlayerGames:xuid=>ipcRenderer.invoke('xbox-player-games',xuid),
   getXboxPeople:(list,query)=>ipcRenderer.invoke('xbox-social-people',list,query),
   getXboxRelationship:xuid=>ipcRenderer.invoke('xbox-social-relationship',xuid),
@@ -17,6 +20,8 @@ const nativeSocial:XboxSocialApi={  getXboxPlayerDetails:xuid=>ipcRenderer.invok
   sendXboxMessage: (account,xuid,text) => ipcRenderer.invoke('xbox-social-send',account,xuid,text),
 };
 const api: LauncherApi = {
+ getXboxDesktopProfile:()=>ipcRenderer.invoke('xbox-desktop-profile'),
+ onXboxDesktopProfile:callback=>{const listener=(_event:Electron.IpcRendererEvent,request:Parameters<typeof callback>[0])=>callback(request);ipcRenderer.on('xbox-desktop-profile',listener);return()=>ipcRenderer.removeListener('xbox-desktop-profile',listener);},
   nativeSocial,
   inviteXboxFriend:(gameId,xuid)=>ipcRenderer.invoke('game-invite-friend',gameId,xuid),
   chooseGameInviteRecipient: (id,xuid) => ipcRenderer.invoke('game-invite-choose',id,xuid),
