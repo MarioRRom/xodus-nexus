@@ -7,6 +7,7 @@ export interface BackendCapabilities {
   gameActivity?: boolean;
   achievements?: boolean;
   library?: boolean;
+  nativeSocial?: boolean;
   login: boolean;
   externalAuth?: boolean;
   logout: boolean;
@@ -360,7 +361,63 @@ export interface AccountLibraryPage {
   skippedEntitlements?: number;
 }
 
+export interface XboxFriend {
+  xuid: string;
+  avatarUrl?:string|null;
+  gamertag: string;
+  online: boolean;
+  presence: string;
+  favorite: boolean;
+  inParty: boolean;
+}
+export interface XboxMessage { id: string; sender: string; timestamp: string | null; text: string; hidden: boolean; mine: boolean }
+export interface XboxPlayerProfile { xuid:string;gamertag:string;gamerscore:string|null;avatarUrl?:string|null }
+export type XboxPeopleList = 'search'|'recent'|'suggested'|'blocked'|'received-requests'|'sent-requests';
+export type XboxRelationshipAction = 'send-request'|'accept-request'|'cancel-request'|'decline-request'|'remove-friend'|'favorite'|'unfavorite'|'block'|'unblock';
+export interface XboxRelationship {
+  xuid:string;isFriend:boolean;isFollowing:boolean;isFollower:boolean;favorite:boolean;blocked:boolean;
+  requestState:'none'|'incoming'|'outgoing'|'unknown';
+}
+export interface XboxPerson extends XboxFriend {reason?:string;lastSeen?:string}
+export interface XboxPeoplePage {items:XboxPerson[];continuation?:string|null;truncated?:boolean}
+export interface XboxPlayerDetails extends XboxPlayerProfile {
+  isSelf?:boolean;
+  bio?:string;location?:string;tenure?:string;
+  colors?:{primary?:string;secondary?:string;tertiary?:string};
+  counts?:{friends?:number;followers?:number;following?:number};
+  relationship?:XboxRelationship;
+}
+export interface XboxProfileGame {
+  titleId:string;name:string;imageUrl?:string;lastPlayed?:string;
+  currentGamerscore?:number;totalGamerscore?:number;achievementsUnlocked?:number;achievementsTotal?:number;
+}
+export interface XboxProfileGames {items:XboxProfileGame[];continuation?:string|null;truncated?:boolean}
+export interface XboxProfileRequest { id:string;xuid:string }
+export interface XboxConversation {
+  id: string;
+  avatarUrl?:string|null;
+  type: string | null;
+  participants: string[];
+  gamertag: string;
+  unread: boolean;
+  lastMessage: XboxMessage | null;
+}
+export interface XboxSocialApi {
+ getXboxPlayerDetails(xuid:string):Promise<XboxPlayerDetails>;
+ getXboxPlayerGames(xuid:string):Promise<XboxProfileGames>;
+ getXboxPeople(list:XboxPeopleList,query?:string):Promise<XboxPeoplePage>;
+ getXboxRelationship(xuid:string):Promise<XboxRelationship>;
+ changeXboxRelationship(account:string,xuid:string,action:XboxRelationshipAction):Promise<void>;
+ getXboxPlayerProfile(xuid:string):Promise<XboxPlayerProfile>;
+ getXboxFriends():Promise<XboxFriend[]>;
+ getXboxInbox():Promise<XboxConversation[]>;
+ getXboxConversation(xuid:string):Promise<XboxMessage[]>;
+ sendXboxMessage(account:string,xuid:string,text:string):Promise<XboxMessageReceipt>;
+}
+export interface XboxMessageReceipt {id:string}
+
 export interface LauncherApi {
+  nativeSocial:XboxSocialApi;
   inviteXboxFriend(gameId:string,xuid:string):Promise<void>;
   chooseGameInviteRecipient(id: string, xuid: string): Promise<void>;
   cancelGameInvite(id: string): Promise<void>;

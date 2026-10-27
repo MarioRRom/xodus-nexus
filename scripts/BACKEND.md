@@ -190,3 +190,12 @@ only. It activates that existing user service if the standard Secret Service
 name has neither an owner nor an activation provider. Existing/default providers
 are left alone. No packages, keyring configuration or plaintext fallback are
 introduced, and keyring failures remain errors.
+
+## Native social API
+
+The optional `native-social` command provides the account-bound people, profile,
+conversation and relationship services alongside the existing `social --json`
+interface. Explicit writes use the signed session and are never silently retried.
+The launcher exposes these operations through a separate `nativeSocial` IPC API.
+Window, party and overlay features register their own authorized senders and lifecycle
+callbacks; the API foundation performs no automatic writes.

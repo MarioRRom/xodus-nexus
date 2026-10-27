@@ -1,11 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Game, InstallRequest, LauncherApi, Settings } from '../shared/types.js';
+import type { Game, InstallRequest, LauncherApi, Settings, XboxSocialApi } from '../shared/types.js';
 
 // Demo fixtures live in the main process (src/shared/demo-data.ts) and are
 // served over these same IPC channels when XODUS_DEMO=1, so the sandboxed
 // preload stays a thin passthrough. Store pages always use the live
 // Microsoft Store catalog. No real credentials, tokens or account data.
+const nativeSocial:XboxSocialApi={  getXboxPlayerDetails:xuid=>ipcRenderer.invoke('xbox-player-details',xuid),
+  getXboxPlayerGames:xuid=>ipcRenderer.invoke('xbox-player-games',xuid),
+  getXboxPeople:(list,query)=>ipcRenderer.invoke('xbox-social-people',list,query),
+  getXboxRelationship:xuid=>ipcRenderer.invoke('xbox-social-relationship',xuid),
+  changeXboxRelationship:(account,xuid,action)=>ipcRenderer.invoke('xbox-social-relationship-change',account,xuid,action),
+  getXboxPlayerProfile:xuid=>ipcRenderer.invoke('xbox-player-profile',xuid),
+  getXboxFriends: () => ipcRenderer.invoke('xbox-social-friends'),
+  getXboxInbox: () => ipcRenderer.invoke('xbox-social-inbox'),
+  getXboxConversation: xuid => ipcRenderer.invoke('xbox-social-conversation',xuid),
+  sendXboxMessage: (account,xuid,text) => ipcRenderer.invoke('xbox-social-send',account,xuid,text),
+};
 const api: LauncherApi = {
+  nativeSocial,
   inviteXboxFriend:(gameId,xuid)=>ipcRenderer.invoke('game-invite-friend',gameId,xuid),
   chooseGameInviteRecipient: (id,xuid) => ipcRenderer.invoke('game-invite-choose',id,xuid),
   cancelGameInvite: id => ipcRenderer.invoke('game-invite-cancel',id),

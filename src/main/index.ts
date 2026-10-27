@@ -1,3 +1,5 @@
+import {XboxSocial as NativeXboxSocial} from './xbox-native-social.js';
+import {resetSocialTransport} from './xbox-social-transport.js';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
 import { constants, createWriteStream, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -85,6 +87,18 @@ const downloadNotifications = new DownloadCompletionNotifications({
   },
 });
 let mainWindow: BrowserWindow | null = null;
+let xboxNativeSocial:NativeXboxSocial;
+const nativeSocialSenders:((event:Electron.IpcMainInvokeEvent)=>boolean)[]=[];
+const nativeSocialResets:(()=>void)[]=[];
+const nativeSocialBeforeAuth:(()=>Promise<void>)[]=[];
+const nativeSocialShutdown:(()=>Promise<void>)[]=[];
+const nativeSocialSnapshots:(()=>void)[]=[];
+function nativeSocialConnection(){
+ const status=backend?.current;
+ return !demoMode&&!authState.running&&authState.stored===true&&authState.username&&status?.binaryPath&&status.capabilities.nativeSocial?{account:authState.username,binary:status.binaryPath}:undefined;
+}
+function resetNativeSocial(){for(const reset of nativeSocialResets)reset();xboxNativeSocial?.clear();resetSocialTransport();}
+
 async function showFriends(): Promise<void> {
   await showLauncher();
   mainWindow?.webContents.send('open-friends');
@@ -288,6 +302,7 @@ function emitSnapshot(): void {
   if (snapshotTimer) clearTimeout(snapshotTimer);
   snapshotTimer = undefined;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('snapshot', snapshot());
+  for(const update of nativeSocialSnapshots)update();
 }
 
 function scheduleSnapshot(): void {
@@ -378,6 +393,7 @@ async function refreshAccount(emit = true, afterAuth = false): Promise<AuthStatu
     return next;
   }, async next => {
     if (authState.username !== next.username || next.stored !== true) xboxSocial.close();
+    if(next.username!==authState.username||next.stored!==true)resetNativeSocial();
     authState = { ...authState, ...next };
     accountLibrary.select(authState.stored === true ? authState.username : undefined,
       status.capabilities.library ? status.binaryPath : undefined, currentMarket());
@@ -439,6 +455,8 @@ async function prepareSystemWallet(): Promise<void> {
 
 async function runAuth(command: 'login' | 'logout'): Promise<void> {
   ensureIdle();
+  for(const prepare of nativeSocialBeforeAuth)await prepare();
+  resetNativeSocial();
   const binary = requireBackend(command);
   const id = `auth-${randomUUID()}`;
   accountRefresh.invalidate();
@@ -1266,7 +1284,21 @@ function registerDemoIpc(catalogMarket: () => string): void {
   ipcMain.handle('open-path', () => {});
 }
 
+function socialSender(event:Electron.IpcMainInvokeEvent):void{
+ if(event.senderFrame!==event.sender.mainFrame||event.sender!==mainWindow?.webContents&&!nativeSocialSenders.some(owns=>owns(event)))throw Error('Social requests must come from Nexus.');
+ if(!backend.current.capabilities.nativeSocial)throw Error('Update the backend to enable native Social.');
+}
 function registerIpc(): void {
+  ipcMain.handle('xbox-player-details',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.details(xuid);});
+  ipcMain.handle('xbox-player-games',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.games(xuid);});
+  ipcMain.handle('xbox-social-people',(event,list:Parameters<NativeXboxSocial['people']>[0],query?:string)=>{socialSender(event);return xboxNativeSocial.people(list,query);});
+  ipcMain.handle('xbox-social-relationship',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.relationship(xuid);});
+  ipcMain.handle('xbox-social-relationship-change',(event,account:string,xuid:string,action:Parameters<NativeXboxSocial['changeRelationship']>[2])=>{socialSender(event);return xboxNativeSocial.changeRelationship(account,xuid,action);});
+  ipcMain.handle('xbox-social-friends', event => {socialSender(event);return xboxNativeSocial.friends();});
+  ipcMain.handle('xbox-player-profile',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.profile(xuid);});
+  ipcMain.handle('xbox-social-inbox', event => {socialSender(event);return xboxNativeSocial.inbox();});
+  ipcMain.handle('xbox-social-conversation', (event,xuid: string) => {socialSender(event);return xboxNativeSocial.conversation(xuid);});
+  ipcMain.handle('xbox-social-send', (event,account: string,xuid: string,text: string) => {socialSender(event);return xboxNativeSocial.send(account,xuid,text);});
   const catalogMarket = currentMarket;
   if (demoMode) {
     registerDemoIpc(catalogMarket);
@@ -1846,6 +1878,7 @@ async function createWindow(): Promise<void> {
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
   if (startupError) { dialog.showErrorBox(nativeText('Invalid Nexus shortcut'), startupError.message); app.quit(); return; }
+  xboxNativeSocial=new NativeXboxSocial(nativeSocialConnection);
   if (!demoMode) {
     backendDiagnostics = new BackendDiagnostics(app.getPath('userData'), () => ({
       launcher: app.getVersion(), backend: backend?.current.version, source: backend?.current.source,
@@ -1952,10 +1985,12 @@ app.on('before-quit', (event) => {
   accountLibrary.reset();
   accountProfile?.cancel();
   accountRefresh.invalidate();
-  if (shutdownStarted || (!xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && gameInviteBridges.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
+  if (shutdownStarted || (!xboxNativeSocial && nativeSocialShutdown.length===0 && !xboxSocial.busy && !walletUnlocker.busy && !backendDiagnostics?.pendingWrites && !authJob && !preparingInstall && downloadCancellations.size === 0 && installQueue.size === 0 && operations.size === 0 && serviceSessions.size === 0 && gameInviteBridges.size === 0 && !checkingGameUpdates && !launcherUpdater?.state.updating)) return;
   event.preventDefault();
   shutdownStarted = true;
   void (async () => {
+    await Promise.allSettled(nativeSocialShutdown.map(stop=>stop()));
+    resetNativeSocial();
     await xboxSocial.settled();
     await walletUnlocker.stop();
     gameUpdateController?.abort();
