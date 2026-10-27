@@ -28,8 +28,7 @@ function fixture(options = {}) {
       return page('keys', [clone(current)]);
     }
     if (url.pathname === `${stem}/languages/2/key/10/suggestion`) {
-      assert.equal(url.searchParams.get('filterState'), 'ACTIVE');
-      return page('suggestions', options.active ?? [suggestion()]);
+      throw Error('Separate suggestion listing requires unnecessary suggest/manage permissions.');
     }
     if (url.pathname === `${stem}/languages/2/key/10/suggestion/40/accept`) {
       assert.equal(method, 'PUT');
@@ -139,7 +138,7 @@ test('preview is read-only and report excludes texts, contributor data and ident
   assert.doesNotMatch(JSON.stringify(report), /Annuler|languageId|keyId|author|translation:/);
 });
 
-test('accept rechecks state and active suggestions, retains authorship and optionally reviews exact translation', async () => {
+test('accept rechecks state and single active view candidate using minimal scopes, retaining authorship', async () => {
   const { api, calls, current } = fixture();
   const report = await acceptSuggestions({ api, english, apply: true, reviewed: true, tags: ['fr'] });
   assert.equal(report.accepted, 1); assert.equal(report.reviewed, 1);
@@ -147,6 +146,7 @@ test('accept rechecks state and active suggestions, retains authorship and optio
   assert.equal(current.translations.en.text, 'Cancel {game}?');
   assert.equal(report.entries[0].status, 'accepted-and-reviewed');
   assert.equal(calls.filter(call => call.method === 'PUT').length, 2);
+  assert.ok(calls.every(call => call.method !== 'GET' || !call.route.includes('/suggestion')));
   assert.ok(calls.every(call => !/decline\?|delete|single-step-import/.test(call.route)));
 });
 
@@ -197,9 +197,15 @@ test('changed cells or changed source before accept are skipped without any muta
   }
 });
 
-test('full suggestion endpoint must still show exactly one same active candidate', async () => {
-  for (const active of [[], [suggestion(), { ...suggestion(), id: 41 }], [{ ...suggestion(), state: 'DECLINED' }], [{ ...suggestion(), keyId: 11 }]]) {
-    const { api, calls } = fixture({ active });
+test('fresh view must still prove exactly one identical ACTIVE nonplural candidate', async () => {
+  for (const change of [
+    value => { value.translations.fr.activeSuggestionCount = 2; },
+    value => { value.translations.fr.suggestions = []; },
+    value => { value.translations.fr.suggestions[0].state = 'DECLINED'; },
+    value => { value.translations.fr.suggestions[0].id = 41; },
+    value => { value.translations.fr.suggestions[0].isPlural = true; },
+  ]) {
+    const { api, calls } = fixture({ beforeView: (value, reads) => { if (reads === 2) change(value); } });
     const report = await acceptSuggestions({ api, english, apply: true });
     assert.equal(report.entries[0].status, 'changed-before-accept');
     assert.ok(calls.every(call => call.method === 'GET'));
