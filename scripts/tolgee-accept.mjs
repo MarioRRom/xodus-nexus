@@ -173,10 +173,10 @@ export async function acceptSuggestions({ api, english, apply = false, reviewed 
       entry.status = 'changed-before-accept'; continue;
     }
     const route = `${project}/languages/${language.id}/key/${row.keyId}/suggestion`;
-    const active = await pages(api, `${route}?filterState=ACTIVE`, 'suggestions', 100);
-    if (active.length !== 1 || active[0].id !== decision.suggestion.id || active[0].languageId !== language.id || active[0].keyId !== row.keyId || active[0].translation !== decision.suggestion.translation || active[0].state !== 'ACTIVE' || active[0].isPlural !== false) {
-      entry.status = 'changed-before-accept'; continue;
-    }
+    // The freshly read translation view already proves activeSuggestionCount=1
+    // and includes that exact ACTIVE suggestion. The separate paginated suggestion
+    // GET requires suggest/manage scopes not needed for accepting it. Keep the
+    // fresh view checks above and verify full key/language identity in the receipt.
     entry.status = 'accept-outcome-unknown';
     const receipt = await api(`${route}/${decision.suggestion.id}/accept?declineOther=false`, 'PUT');
     const accepted = receipt.accepted;
