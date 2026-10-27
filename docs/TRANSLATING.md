@@ -18,8 +18,9 @@ Never upload account data or private screenshots to the translation project.
    can add it to the project.
 2. Import `assets/locales/en.json` as **i18next JSON**, not native Tolgee JSON.
 3. For community contributions, enable a public project and translation suggestions
-   in Tolgee. Share the project's public link. Maintainers review suggestions before
-   accepting them. See [Tolgee's community guide](https://docs.tolgee.io/platform/translation_process/community-translation).
+   in Tolgee. Share the project's public link. Suggestions can be accepted by a
+   maintainer or the checked batch tool described below. See
+   [Tolgee's community guide](https://docs.tolgee.io/platform/translation_process/community-translation).
 4. Export accepted, reviewed translations as **i18next JSON**, with flat keys and
    i18next placeholders. Omit untranslated or empty values. Do not export ICU or
    nested JSON directly into the launcher.
@@ -50,6 +51,47 @@ The checked-in configuration uploads only `assets/locales/en.json`, not target
 translations, screenshots or other files. It updates existing English entries
 without deleting remote keys or overwriting community target translations.
 Removed source keys require a separate maintainer cleanup after review.
+
+### Batch acceptance of community suggestions
+
+The **Accept checked translation suggestions** workflow runs manually on `main`.
+Choose `preview`, `accept`, or `accept-and-review`, optionally limiting the target
+languages (for example `fr,es`). One run processes all eligible suggestions and
+produces a report of accepted and skipped keys. It does not build, publish, merge
+or change bundled translation files.
+
+Configure a separate `TOLGEE_REVIEW_API_KEY` repository secret, restricted to
+project **36162**, with `keys.view`, `translations.view`, `translations.edit` and
+`translations.state-edit`. Restrict editing and state changes to target languages
+where the credential supports language restrictions. No deletion, administration,
+screenshots or account-wide access is needed. Never reuse the source-upload key.
+
+The tool accepts only a single active suggestion into an empty target translation.
+It checks the English source against Git, parameter occurrences, protected product
+names and URLs, plain-text syntax, script compatibility, formatting and length.
+English, existing translations, plurals, conflicting suggestions, unresolved
+comments and unsupported cases are left untouched. Contributor attribution stays
+in Tolgee; competing suggestions are not declined or deleted.
+
+These are **technical checks, not a linguistic review**. A valid sentence can
+still have incorrect meaning, grammar or even the wrong Latin-script language.
+`accept-and-review` marks eligible entries `REVIEWED` for export based on this
+technical policy. Choose `accept` if a language reviewer should check them first.
+Avoid editing the same entries while the batch runs: Tolgee's accept API has no
+atomic compare-and-set guard. The tool rechecks immediately before acceptance,
+verifies the result and stops on errors without retrying uncertain writes.
+
+For local use, supply the key through a private environment, not a command line
+or a committed file:
+
+```sh
+npm run i18n:accept -- --languages fr
+npm run i18n:accept -- --languages fr --apply --reviewed
+```
+
+The first command previews without writes. The second accepts eligible French
+suggestions and marks them reviewed. Reports contain key names, language tags and
+outcomes, not credentials, contributor identifiers or translation text.
 
 ### Reviewed translations back into Git
 
