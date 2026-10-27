@@ -321,6 +321,55 @@ test('GET 429 honors bounded Retry-After, PUT and uncertain requests are never r
   }
 });
 
+test('multi-key batches verify every entry with at most two views per twenty candidates', async () => {
+  const source = {}; const values = new Map(); const calls = []; let views = 0;
+  for (let i = 0; i < 45; i++) {
+    source[`item${i}`] = 'Cancel {{game}}?';
+    const value = row(); value.keyId = 100 + i; value.keyName = `item${i}`;
+    value.translations.fr.suggestions = [{ ...suggestion(), id: 500 + i, keyId: value.keyId }];
+    values.set(value.keyId, value);
+  }
+  const api = async (route, method = 'GET') => {
+    calls.push({ route, method }); const url = new URL(`https://app.tolgee.io${route}`);
+    if (url.pathname.endsWith('/languages')) return page('languages', languages);
+    if (url.pathname.endsWith('/translations')) {
+      views++;
+      const selected = url.searchParams.getAll('filterKeyId').map(Number);
+      if (selected.length) assert.ok(selected.length <= 20);
+      if (views === 2) values.get(102).translations.fr.text = 'Manual edit before batch';
+      return page('keys', clone([...values.values()].filter(value => !selected.length || selected.includes(value.keyId))));
+    }
+    const accept = url.pathname.match(/languages\/2\/key\/(\d+)\/suggestion\/(\d+)\/accept$/);
+    if (accept) {
+      const value = values.get(Number(accept[1])); const candidate = value.translations.fr.suggestions[0];
+      assert.equal(candidate.id, Number(accept[2]));
+      value.translations.fr.text = candidate.translation; value.translations.fr.id = value.keyId + 1000;
+      value.translations.fr.state = 'TRANSLATED';
+      return { accepted: { ...candidate, state: 'ACCEPTED' }, declined: [] };
+    }
+    const review = url.pathname.match(/translations\/(\d+)\/set-state\/REVIEWED$/);
+    if (review) {
+      const value = values.get(Number(review[1]) - 1000);
+      value.translations.fr.state = 'REVIEWED'; return clone(value.translations.fr);
+    }
+    throw Error('Unexpected operation');
+  };
+  const report = await acceptSuggestions({ api, english: source, apply: true, reviewed: true });
+  assert.equal(views, 7); // initial snapshot + two views for each of three groups
+  assert.equal(report.accepted, 44); assert.equal(report.reviewed, 44);
+  assert.equal(report.entries.find(value => value.key === 'item2').status, 'changed-before-accept');
+  assert.equal(values.get(102).translations.fr.text, 'Manual edit before batch');
+  assert.equal(calls.filter(value => value.method === 'PUT').length, 88);
+});
+
+test('production-style request spacing is conservative and does not change response semantics', async () => {
+  const waits = [];
+  const api = createApi('synthetic', async () => new Response('{}'), async value => { waits.push(value); }, 200);
+  await api('/v2/projects/36162/languages');
+  await api('/v2/projects/36162/languages');
+  assert.equal(waits.length, 1); assert.ok(waits[0] > 100 && waits[0] <= 200);
+});
+
 test('CLI is default preview, unknown/duplicate/injected flags fail closed', () => {
   assert.deepEqual(argumentsFor([]), { apply: false, reviewed: false, tags: [] });
   assert.deepEqual(argumentsFor(['--apply', '--reviewed', '--languages', 'fr,es']), { apply: true, reviewed: true, tags: ['fr', 'es'] });
