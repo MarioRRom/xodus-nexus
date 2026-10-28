@@ -1,4 +1,4 @@
-import {ui} from './i18n';
+import {ui,uiText} from './i18n';
 import {useEffect,useId,useLayoutEffect,useRef,useState,type KeyboardEvent} from 'react';
 import {ExternalLink,LoaderCircle,RefreshCw,Send,X} from 'lucide-react';
 import type {XboxMessage,XboxPlayerProfile,XboxSocialApi} from '../shared/types';
@@ -32,10 +32,11 @@ export class XboxChatSession {
  }
  start():Promise<void>{
   if(this.closed)return Promise.resolve();
+  const history=this.refresh('initial');
   try{void this.api.getXboxPlayerProfile(this.xuid).then(profile=>{
    if(!this.closed&&profile.xuid===this.xuid)this.publish({profile});
   }).catch(()=>{});}catch{}
-  return this.refresh('initial');
+  return history;
  }
  setDraft(draft:string):void{this.publish({draft});}
  close():void{this.closed=true;this.readVersion++;this.reading=undefined;}
@@ -78,30 +79,46 @@ export class XboxChatSession {
  }
 }
 
-export type XboxChatProps={api:XboxSocialApi;account:string;xuid:string;displayName?:string;close?:()=>void;popOut?:()=>void;openProfile?:(xuid:string)=>void};
+export type XboxChatProps={api:XboxSocialApi;account:string;xuid:string;displayName?:string;close?:()=>void;popOut?:()=>void;openProfile?:(xuid:string)=>void;active?:boolean;onViewed?:(peer:string,ids:string[])=>void};
 const useBrowserLayoutEffect=typeof window==='undefined'?useEffect:useLayoutEffect;
 
 /** Shared inline, desktop and overlay conversation; the parent supplies its size and window controls. */
 export function XboxChat(props:XboxChatProps){
  return <XboxChatView key={JSON.stringify([props.account,props.xuid])} {...props}/>;
 }
-function XboxChatView({api,account,xuid,displayName,close,popOut,openProfile}:XboxChatProps){
+function XboxChatView({api,account,xuid,displayName,close,popOut,openProfile,active=true,onViewed}:XboxChatProps){
  const [state,setState]=useState<XboxChatState>(empty);
  const countId=useId();
  const session=useRef<XboxChatSession>(),list=useRef<HTMLDivElement>(null);
  const pinned=useRef(true),previousSend=useRef(0);
+ const wasActive=useRef(false);
+ const visible=useRef(active);visible.current=active;
+ const viewed=useRef(onViewed);viewed.current=onViewed;
+ const observe=()=>{
+  const element=list.current;if(!element)return;
+  pinned.current=element.scrollHeight-element.scrollTop-element.clientHeight<32;
+  if(visible.current&&document.visibilityState==='visible'&&document.hasFocus()&&element.getClientRects().length&&pinned.current)
+   viewed.current?.(xuid,state.messages.map(message=>message.id));
+ };
  useEffect(()=>{
   const current=new XboxChatSession(api,account,xuid,setState);session.current=current;setState(current.current);pinned.current=true;previousSend.current=0;
   void current.start();
-  const visible=()=>{if(document.visibilityState==='visible')void current.refresh('poll');};
-  const timer=setInterval(visible,5000);document.addEventListener('visibilitychange',visible);
-  return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visible);current.close();if(session.current===current)session.current=undefined;};
+  const refresh=()=>{if(visible.current&&document.visibilityState==='visible')void current.refresh('poll');};
+  const timer=setInterval(refresh,15000);document.addEventListener('visibilitychange',refresh);
+  return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',refresh);current.close();if(session.current===current)session.current=undefined;};
  },[api,account,xuid]);
  useBrowserLayoutEffect(()=>{
   const element=list.current;if(!element)return;
+  if(active&&!wasActive.current)pinned.current=true;wasActive.current=active;
   if(pinned.current||state.sent!==previousSend.current){element.scrollTop=element.scrollHeight;pinned.current=true;}
   previousSend.current=state.sent;
- },[state.messages,state.sent]);
+  observe();
+ },[state.messages,state.sent,active]);
+ useEffect(()=>{if(active)void session.current?.refresh('poll');},[active]);
+ useEffect(()=>{
+  const focus=()=>observe();window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
+  return()=>{window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
+ },[active,state.messages]);
  const name=state.profile?.gamertag??displayName??'Xbox player';
  const valid=xboxChatCanSend(state.draft),count=[...state.draft].length;
  return <section className="social-chat" aria-label={'Chat with '+name} style={{display:'flex',flexDirection:'column',flex:1,minWidth:0,minHeight:0,height:'100%',overflow:'hidden'}}>
@@ -114,15 +131,15 @@ function XboxChatView({api,account,xuid,displayName,close,popOut,openProfile}:Xb
    {close?<button type="button" className="social-circle-button social-close" onClick={close} aria-label={ui("social.close_chat_3b14c5")} title={ui("social.close_chat_3b14c5")}><X/></button>:null}
   </header>
   <div className="social-messages" role="log" aria-label={'Messages with '+name} aria-live="polite" aria-relevant="additions text" aria-busy={state.loading} ref={list}
-   onScroll={()=>{const element=list.current;if(element)pinned.current=element.scrollHeight-element.scrollTop-element.clientHeight<160;}}>
+   onScroll={observe}>
    {state.messages.map(item=><article key={item.id} className={'social-message'+(item.mine?' is-mine':'')+(item.hidden?' filtered':'')}>
-    <p>{item.text||'Message unavailable'}</p>{item.timestamp&&Number.isFinite(Date.parse(item.timestamp))?<time dateTime={item.timestamp}>{new Date(item.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time>:null}
+    <p>{item.hidden?ui('ui.message_hidden_or_unsupported_d199cb4'):item.text||ui('social.message_unavailable')}</p>{item.timestamp&&Number.isFinite(Date.parse(item.timestamp))?<time dateTime={item.timestamp}>{new Date(item.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time>:null}
    </article>)}
    {state.loading&&!state.messages.length?<p className="social-loading" role="status"><LoaderCircle className="spin"/>{ui("social.loading_conversation_5eb1e4")}</p>:null}
    {!state.loading&&!state.messages.length&&!state.problem?<p className="social-empty">{ui("social.no_messages_in_this_conversation_1e56e8")}</p>:null}
   </div>
-  {state.problem?<p className="social-error" role="alert">{state.problem}</p>:null}
-  {state.notice?<p className="social-action-status" role="status">{state.notice}</p>:null}
+  {state.problem?<p className="social-error" role="alert">{uiText(state.problem)}</p>:null}
+  {state.notice?<p className="social-action-status" role="status">{uiText(state.notice)}</p>:null}
   <form className="social-compose" onSubmit={event=>{event.preventDefault();void session.current?.send();}}>
    <textarea aria-label={'Message '+name} value={state.draft} onChange={event=>session.current?.setDraft(event.target.value)} maxLength={512} placeholder={ui("social.type_a_message_00cd58")} disabled={state.sending}
     onKeyDown={xboxChatComposeKey} aria-describedby={countId}/>

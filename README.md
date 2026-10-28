@@ -81,13 +81,6 @@ Flatpak version available through Discover. Other browsers are not supported.
 - **Settings → Shader cache** sets the per-game Mesa/NVIDIA driver cache limit, 4 GiB by default. Changes apply on the next game launch; explicit environment overrides take precedence.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
 
-## Native Social
-
-The Social button at the bottom right opens a native friends and chat shelf.
-Select a friend to chat, or use the context menu for profiles and relationship
-actions. Full profiles open inside Nexus. A backend advertising `native-social`
-is required. Chat windows, party audio and the in-game Guide are optional additions.
-
 ## Wallet setup and unlocking
 
 - If the service is stopped, use **Start service**. Supported KDE wallets should also start automatically when Nexus opens in Game Mode.

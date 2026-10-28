@@ -5,6 +5,12 @@ import type {XboxMessage,XboxMessageReceipt,XboxPlayerProfile,XboxSocialApi} fro
 import {XboxChat,XboxChatSession,xboxChatCanSend,xboxChatComposeKey,type XboxChatState} from './XboxChat';
 
 const message=(id:string,text=id):XboxMessage=>({id,text,sender:'2',mine:false,hidden:false,timestamp:'2026-10-23T12:34:56Z'});
+it('queues conversation history before its optional player profile',async()=>{
+ const f=fixture(),order:string[]=[];
+ f.api.getXboxConversation.mockImplementation(async()=>{order.push('history');return [];});
+ f.api.getXboxPlayerProfile.mockImplementation(async()=>{order.push('profile');return{xuid:'2',gamertag:'Fixture',gamerscore:null};});
+ await f.chat.start();expect(order).toEqual(['history','profile']);f.chat.close();
+});
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(reason:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};}
 function fixture(account='account-a',xuid='2'){
  const api={
