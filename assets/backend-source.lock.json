@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v55",
+  "patchId": "linux-run-v59",
   "compatibility": "linux-run-v25",
   "patches": [
     { "file": "xodus-linux-run.patch", "sha256": "68f260ec2c6e9264c47ed1a650868511f5412a756725d4000a865804f4712e8b" },
@@ -60,9 +60,14 @@
     { "file": "xodus-plain-launch-entry.patch", "sha256": "6106f03e38d57f6d62f6662b3567dd5599a3e95b09d653d48e99eb5bba3d3fb8" },
     { "file": "xodus-package-storage.patch", "sha256": "76c2c805a62cc3b424bd5b91c26402a1aee46f21efbd785402aa52aea7784510" },
     { "file": "xodus-social-stdout.patch", "sha256": "9386eedd91d6ac48fd7c369565bb3c2f7c22688a87239ef434d3c6aeb45cf115" },
-    { "file": "xodus-offline-license.patch", "sha256": "fc99f5c4f02598ad520bebdfc689eeeb7d292546bfdb407b0fd49f31c5315620" },
-    { "file": "xodus-offline-fast-path.patch", "sha256": "af9714d0d53a1db64581e4e7a2597f65d1c74acbca08384e231031685a09dc93" },
-    { "file": "xodus-offline-launch.patch", "sha256": "693d9f2ccbbee4735f7ceb33741c7212f228960a3a483659a075771e1444b98e" },
-    { "file": "xodus-offline-license-revocation.patch", "sha256": "16560118bd7f01a6a624f4e72292f4b15e8a5a04e2585e6cb7f9eec60dc21fd4" }
+    { "file": "xodus-xbox-jwe-ticket.patch", "sha256": "69c40949cdaabe32e554bb9a9065c9d67ed59252ac6e367303a6ded06d42f8e4" },
+    { "file": "xodus-plain-region-images.patch", "sha256": "ca300dfc1eea193dcaa767808fd10ccdf0666db61a03ad937b973f8ddf224fc8" },
+    { "file": "xodus-plain-region-regressions.patch", "sha256": "2d9c4ec0b3a12b697464b6c6417b55eb52a808c896dfacdc86da3e70e5a6919b" },
+    { "file": "xodus-auth-response-selection.patch", "sha256": "78731bf2c7c4dcce5def27ca580c338a15f04376e47c833423a224790dc78f51" },
+    { "file": "xodus-device-registration-response.patch", "sha256": "9b36ee0bbd9643faebe34016b523407a62c127f98823c58ec61f26d926ea88bb" },
+    { "file": "xodus-offline-license.patch", "sha256": "ff882b6132e77434ef015e961b603382b2a7cffcba6ccc716c0b92a9c9b7639d" },
+    { "file": "xodus-offline-fast-path.patch", "sha256": "0062f4ff46373a30b83a235a5862908d0f52c9cac5d7c916be17053e4b151d65" },
+    { "file": "xodus-offline-launch.patch", "sha256": "2ff332a61a0ad8400d11b1c6370eab4c0a09a090a4dd7cacb483ed9bc5f96c1d" },
+    { "file": "xodus-offline-license-revocation.patch", "sha256": "d9363ca35087ea10eed2b8ba6c9d9a6f770384ce16da141b113ff83e1ac36776" }
   ]
 }

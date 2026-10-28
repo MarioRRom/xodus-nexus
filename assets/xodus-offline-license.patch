@@ -216,10 +216,10 @@ index 0000000..66a3591
 +    }
 +}
 diff --git a/crates/xodus-cli/src/commands/run.rs b/crates/xodus-cli/src/commands/run.rs
-index 1ec9cb9..e0335b7 100644
+index 520110a..2068882 100644
 --- a/crates/xodus-cli/src/commands/run.rs
 +++ b/crates/xodus-cli/src/commands/run.rs
-@@ -535,6 +535,7 @@ pub async fn run(
+@@ -546,6 +546,7 @@ pub async fn run(
      materialize_exe: bool,
      materialize_chain: bool,
      market: Option<String>,
@@ -227,8 +227,8 @@ index 1ec9cb9..e0335b7 100644
  ) -> ExitCode {
      let mut lfiles: HashMap<String, SegmentFile> = HashMap::new();
  
-@@ -572,11 +573,13 @@ pub async fn run(
-         lfiles.extend(sfiles);
+@@ -589,11 +590,13 @@ pub async fn run(
+         merge_plain_launch_files(&mut lfiles, plain);
      }
  
 +    let license_cache = license_cache.map(PathBuf::from);

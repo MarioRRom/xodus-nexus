@@ -806,5 +806,6 @@
   "ui.your_owned_games_game_pass_games_and_local_insta_ebb2bf4": "Your owned games, Game Pass games and local installations.",
   "ui.your_pc_games_brought_together_354f2fc": "Your PC games, brought together.",
   "ui.your_settings_and_games_will_not_change_3e99619": "Your settings and games will not change.",
-  "ui.your_wallet_provider_handles_its_password_window_eb886e1": "Your wallet provider handles its password window. Nexus does not receive the password, enable a disabled wallet or reset stored credentials."
+  "ui.your_wallet_provider_handles_its_password_window_eb886e1": "Your wallet provider handles its password window. Nexus does not receive the password, enable a disabled wallet or reset stored credentials.",
+  "friends.send_shortcut": "Enter to send; Shift+Enter for a new line."
 }
