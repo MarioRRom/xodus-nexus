@@ -51,6 +51,7 @@ command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'k
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_license_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'xbox_delegation_ticket_']);
+command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus-cli', 'hosted_signin_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'ticket_diagnostic_']);
 command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'store_']);
 command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'account_metadata_']);

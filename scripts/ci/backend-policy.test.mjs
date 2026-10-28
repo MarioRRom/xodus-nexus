@@ -191,6 +191,25 @@ test('Xbox sign-in sends compact JWE delegation tickets as t= and keeps opaque t
   assert.ok(build.includes("'-p', 'xodus', 'xbox_delegation_ticket_'"));
 });
 
+test('game sign-in selects response types before persistence and propagates Sisu failures (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(value => value.file === 'xodus-auth-response-selection.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]).sort();
+  assert.deepEqual(files, ['crates/xodus/src/api/xbox/auth.rs', 'crates/xodus/src/auth.rs', 'crates/xodus/src/auth/sisu_response_tests.rs']);
+  for (const name of ['credential_sisu_selects_compact_and_refresh_tokens_independently_of_response_order',
+    'credential_sisu_keeps_jwe_opaque_and_single_response_ticket_formats',
+    'credential_sisu_rejects_missing_duplicate_unknown_and_malformed_tokens_without_payload_errors',
+    'xbox_delegation_ticket_reaches_the_real_user_request_without_an_extra_prefix']) assert.ok(patch.includes(name), name);
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.ok(added.includes('sisu_user_tokens(user_token)?'));
+  assert.ok(added.includes('.await?;'));
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  for (const filter of ['credential_', 'xbox_delegation_ticket_', 'hosted_signin_']) assert.ok(build.includes(`'${filter}'`));
+});
+
 test('auth response consistency and coherent credential persistence are pinned and account-free tested', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   assert.ok(lock.patches.some(p => p.file === 'xodus-auth-consistency.patch'));
