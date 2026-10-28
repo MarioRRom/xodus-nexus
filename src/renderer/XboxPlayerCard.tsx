@@ -36,7 +36,6 @@ export function XboxPlayerCard({api,account,xuid,person,ownAvatar,chat,party,bac
     <div className="social-profile-details">
      {(relationship?relationship.isFriend:Boolean(person))?<span><XboxSocialIcon name="people"/>{ui("social.friend_acd8f6")}{relationship?.favorite||person?.favorite?' · Favourite':''}</span>:null}
      {profile.gamerscore!==null?<span aria-label={profile.gamerscore+' Gamerscore'}><b className="social-score-icon" aria-hidden="true">G</b>{profile.gamerscore}</span>:null}
-     {profile.tenure?<span>{ui("social.xbox_tenure_0948e1")} {profile.tenure}</span>:null}
     </div>
     <div className="social-profile-columns">
      <div className="social-profile-about">
