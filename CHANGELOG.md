@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Reduce disk space and downloads for game updates by reusing verified local data, and support recovery of interrupted updates. Thanks @Rbanh.
-
+- Remove abandoned temporary game launch directories while preserving active sessions and directories without a usable session lock. Thanks @xerhab.
 - Fix Xbox sign-in, downloads and profiles failing with "Xbox authentication request failed" for accounts that receive compact JWE delegation tickets; other tickets are unchanged. Thanks @burghr.
 - Handle reordered game sign-in responses and return authentication failures without crashing the account service.
 - Return a normal sign-in error for invalid or refused device registration responses instead of crashing.
