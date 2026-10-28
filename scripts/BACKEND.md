@@ -198,8 +198,14 @@ its game folder. The space check counts the largest replacement plus net growth
 and a metadata reserve, rather than requiring another full installation. A
 finished file is synced and atomically renamed; incomplete files and checkpoints
 remain available for Retry. The completed package marker changes only after all
-files finish. Cancellation can leave a mixture of old and updated files; finish
-the update before playing. This is per-file protection, not whole-game rollback.
+files finish. Before the first replacement the backend syncs an
+`.nexus-update-incomplete-v1` barrier. A cancelled or failed update retains this
+barrier, so the launcher and `run` refuse to start the incomplete installation,
+even after queue history is cleared or the launcher restarts. **Resume update**
+continues installation and clears the barrier only after the final package
+metadata has been committed and synced. This is per-file protection, not
+whole-game rollback. The streaming help advertises `update-recovery-v1`;
+the launcher requires that capability before updating an installed game.
 
 Matching package page hashes can identify old data even after archive offsets
 move. Before reuse, installed plaintext is encrypted in memory with the normal

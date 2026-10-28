@@ -15,7 +15,7 @@ vi.mock('./process.js', async importOriginal => {
       const marker = (await fs.readFile(cmd))[63];
       if (marker === 7) return {code:127,output:'/private/path/xodus-cli: error while loading shared libraries: libdbus-1.so.3: cannot open shared object file: No such file or directory\n'};
       if (args[0] === 'resolve-package') return { code:0,output: marker === 6 ? '--include-dlc\n' : '--json\n--market\n' };
-      return { code: 0, output: args[0] === 'streaming' ? '--selected-content-id\n' + ([3,5].includes(marker) ? '--progress-json\n--control-stdin\n' : '') + (marker === 3 ? '--download-limit-kib\n' : '') : args[0] === 'run' ? (marker === 2 ? '--unsupported' : '--materialize-chain') :
+      return { code: 0, output: args[0] === 'streaming' ? '--selected-content-id\n' + ([3,5].includes(marker) ? '--progress-json\n--control-stdin\n' : '') + (marker === 3 ? '--download-limit-kib\n' : '') + (marker === 8 ? 'Nexus capabilities: update-recovery-v1\n' : '') : args[0] === 'run' ? (marker === 2 ? '--unsupported' : '--materialize-chain') :
         (marker === 1 ? 'xodus-cli 0.1.0\n  login    Login\n  streaming    Streaming\n' :
         'xodus-cli 0.1.0\n  account    Account\n  login    Login\n  logout    Logout\n  download    Download\n  streaming    Streaming\n  run    Run\n  resolve-package    Resolve packages\n' + (marker === 4 ? '' : '\nOptions:\n  --external-webview-stdio  External UI\n')) };
     }
@@ -31,6 +31,16 @@ const url = (name: string) => `https://github.com/domsvoboda/xodus-nexus/release
 const elf = () => { const bytes = Buffer.alloc(64); bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1]); bytes.writeUInt16LE(62, 18); return bytes; };
 
 describe('prebuilt backend', () => {
+  it.each([false, true])('requires the real update-recovery capability rather than progress support: %s', async supported => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-update-caps-'));
+    try {
+      const cli = path.join(root, 'target/release/xodus-cli'); await fs.mkdir(path.dirname(cli), { recursive: true });
+      const bytes = elf(); bytes[63] = supported ? 8 : 3; await fs.writeFile(cli, bytes, { mode: 0o755 });
+      const status = await new BackendManager(root, root, () => {}, () => false).refresh();
+      expect(status.capabilities.streamingUpdateRecovery).toBe(supported);
+      if (!supported) expect(status.capabilities.streamingControls).toBe(true);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
   it('reports a missing loader dependency instead of hiding it behind offline status (#328)',async()=>{
     const root=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-backend-loader-'));
     try{

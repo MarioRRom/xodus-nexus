@@ -71,6 +71,7 @@ for (const name of ['account', 'login', 'logout', 'download', 'streaming', 'run'
 if (!command(cli, ['run', '--help'], true).includes('--materialize-chain')) throw Error('Launch-chain support missing');
 if (!command(cli, ['resolve-package', '--help'], true).includes('--include-dlc')) throw Error('Managed DLC selection capability missing');
 const streamingHelp = command(cli, ['streaming', '--help'], true);
+if (!streamingHelp.includes('Nexus capabilities: update-recovery-v1')) throw Error('Durable update recovery capability missing');
 for (const flag of ['--progress-json', '--control-stdin', '--selected-content-id', '--download-limit-kib']) {
   if (!streamingHelp.includes(flag)) throw Error(`Structured download capability missing: ${flag}`);
 }

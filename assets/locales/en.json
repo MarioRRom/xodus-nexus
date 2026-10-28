@@ -746,5 +746,10 @@
   "ui.your_settings_and_games_will_not_change_3e99619": "Your settings and games will not change.",
   "ui.your_wallet_provider_handles_its_password_window_eb886e1": "Your wallet provider handles its password window. Nexus does not receive the password, enable a disabled wallet or reset stored credentials.",
   "friends.send_shortcut": "Enter to send; Shift+Enter for a new line.",
-  "downloads.reused_and_network": "{{reused}} reused locally · {{network}} downloaded"
+  "downloads.reused_and_network": "{{reused}} reused locally · {{network}} downloaded",
+  "downloads.resume_update": "Resume update",
+  "downloads.update_incomplete": "An update was interrupted. Resume the update before playing.",
+  "downloads.update_state_unreadable": "The installation update state could not be checked. Check access to the game folder.",
+  "downloads.update_validation_failed": "Update validation failed. Resume the update before playing.",
+  "downloads.update_backend_required": "Update the Nexus backend in Settings before updating installed games safely."
 }

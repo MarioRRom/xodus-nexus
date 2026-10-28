@@ -15,6 +15,7 @@ export interface BackendCapabilities {
   streamingProgressJson?: boolean;
   streamingControls?: boolean;
   streamingBandwidthLimit?: boolean;
+  streamingUpdateRecovery?: boolean;
   packageSelection?: boolean;
   contentPackageSelection?: boolean;
   run: boolean;
@@ -111,6 +112,7 @@ export interface Game {
   heroUrl?: string; // Wide Store artwork for the game detail panel.
   installState: 'ready' | 'incomplete' | 'imported';
   installMessage?: string;
+  updateIncomplete?: boolean; // Refreshed from the backend's on-disk update barrier.
   vcRedistEncrypted?: boolean;
   antiCheat?: {
     provider: 'Easy Anti-Cheat';

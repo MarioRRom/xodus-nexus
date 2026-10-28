@@ -8,6 +8,49 @@ import path from 'node:path';
 import os from 'node:os';
 import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
 
+test('incremental updates retain verified reuse and a durable launch barrier until metadata commit (#405)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const names = ['xodus-incremental-update.patch', 'xodus-incremental-update-safety.patch'];
+  const patches = [];
+  for (const name of names) {
+    const entry = lock.patches.find(patch => patch.file === name); assert.ok(entry);
+    const patch = await fs.readFile(`assets/${name}`, 'utf8'); patches.push(patch);
+    assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  }
+  assert.ok(lock.patches.findIndex(patch => patch.file === names[1]) > lock.patches.findIndex(patch => patch.file === names[0]));
+  const [reuse, safety] = patches;
+  for (const token of ['stored_page_verifier', 'verifier.matches', 'streaming_update_reuses_relocated_pages_and_downloads_modified_or_corrupt_pages_only',
+    'streaming_update_verifier_checks_licensed_plaintext_ciphertext_wrong_keys_and_modified_pages']) assert.ok(reuse.includes(token), token);
+  assert.deepEqual([...safety.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]), [
+    'crates/xodus-cli/src/main.rs', 'crates/xodus-cli/src/commands/run.rs',
+    'crates/xodus-cli/src/commands/streaming.rs', 'crates/xodus-cli/src/commands/streaming_update.rs',
+    'crates/xodus-cli/src/commands/streaming_failure.rs',
+    'crates/xodus-cli/src/installation_state.rs',
+  ]);
+  for (const token of ['streaming_update_barrier_survives_failure_and_clears_only_after_metadata_commit',
+    'streaming_update_interrupted_multifile_commit_remains_blocked_until_recovery_finishes',
+    'streaming_update_recovery_rechecks_old_metadata_and_preserves_optional_placeholders',
+    'streaming_update_actual_run_refuses_incomplete_installation_before_game_or_account_access',
+    'streaming_update_completed_never_skips_zero_length_or_oversized_replacements',
+    'streaming_update_reuses_complete_ciphertext_tail_on_initial_and_resumed_updates',
+    'streaming_update_launch_preserves_read_only_and_unsupported_lock_installations']) assert.ok(safety.includes(token), token);
+  const added = safety.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.match(safety, /installation_state::begin\(root\)\?;[\s\S]*fs::rename\(&from, &to\)/);
+  assert.match(added, /fs::rename\(cache, final_path\)\?;[\s\S]*sync_all\(\)\?;[\s\S]*fs::remove_file\(root.join\(INCOMPLETE\)\)/);
+  assert.match(added, /installation_state::launch_guard\(out\)/);
+  assert.match(added, /update::begin\(out, &rfiles, &pending\)/);
+  assert.match(added, /placeholders.contains\(name\)/);
+  assert.match(added, /Nexus capabilities: update-recovery-v1/);
+  const state = await fs.readFile('src/main/installation-state.ts', 'utf8');
+  assert.ok(state.includes("'.nexus-update-incomplete-v1'"));
+  assert.ok(added.includes('".nexus-update-incomplete-v1"'));
+  const launcher = await fs.readFile('src/main/index.ts', 'utf8');
+  assert.match(launcher, /updateGame && !backend.current.capabilities.streamingUpdateRecovery/);
+  assert.match(launcher, /if \(await refreshIncompleteUpdate\(game\)\)/);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.match(build, /streamingHelp.includes\('Nexus capabilities: update-recovery-v1'\)/);
+});
+
 test('manifest-selected plain package executables keep licensing and encrypted-library handling (#239)',async()=>{
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(value=>value.file==='xodus-plain-launch-entry.patch');assert.ok(entry);

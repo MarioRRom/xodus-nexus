@@ -732,9 +732,9 @@ export function LibraryPage({ data, toast, filters, onFiltersChange, selection }
         .then(() => toast({ kind: 'success', message: destination === 'steam' ? ui("ui.game_added_to_steam_with_available_artwork_10de13f") : destination === 'desktop' ? ui("ui.desktop_shortcut_created_your_desktop_may_ask_yo_0940fc6") : ui("ui.game_added_to_applications_menu_5179a1d") }))
         .catch(error => toast({ kind: 'error', message: errorMessage(error) }));
     },
-    onUpdate: () => { setMenu(undefined); if (data.gameUpdates?.[game.id]?.available) void updateInstalledGame(game); else void checkUpdates(game.id); },
-    updateLabel: data.gameUpdates?.[game.id]?.checking ? ui("ui.checking_ec963ff") : data.gameUpdates?.[game.id]?.available ? ui("ui.update_game_60a47ea") : ui("ui.check_for_updates_f26f327"),
-    updateDisabled: Boolean(data.gameUpdates?.[game.id]?.checking || !game.storeId || game.installState !== 'ready' || !data.backend.capabilities.streaming || data.downloads.some(task => task.status === 'running')),
+    onUpdate: () => { setMenu(undefined); if (game.updateIncomplete || data.gameUpdates?.[game.id]?.available) void updateInstalledGame(game); else void checkUpdates(game.id); },
+    updateLabel: game.updateIncomplete ? ui('downloads.resume_update') : data.gameUpdates?.[game.id]?.checking ? ui("ui.checking_ec963ff") : data.gameUpdates?.[game.id]?.available ? ui("ui.update_game_60a47ea") : ui("ui.check_for_updates_f26f327"),
+    updateDisabled: Boolean(data.gameUpdates?.[game.id]?.checking || !game.storeId || game.installState !== 'ready' && !game.updateIncomplete || !data.backend.capabilities.streaming || data.downloads.some(task => ['running', 'queued', 'paused'].includes(task.status) && (task.gameId === game.id || task.status === 'running'))),
     onContent: () => { setMenu(undefined); setContentGameId(game.id); },
     contentDisabled: !game.storeId || data.auth.stored !== true || !data.backend.capabilities.library,
   });

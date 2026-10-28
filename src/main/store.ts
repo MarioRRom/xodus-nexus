@@ -8,6 +8,7 @@ import { DEFAULT_SHADER_CACHE_GIB, shaderCacheLimits } from '../shared/shader-ca
 import { interfaceLanguagePreference } from '../shared/interface-language.js';
 import { resolvePackageFile } from './windows-path.js';
 import { parsePackageXml } from './package-xml.js';
+import { hasIncompleteUpdate, INCOMPLETE_UPDATE_MESSAGE } from './installation-state.js';
 import { manifestAttr as attr, manifestText as text, manifestElements, manifestAttribute } from './manifest-xml.js';
 
 interface PersistedState {
@@ -219,8 +220,9 @@ export async function inspectGameDirectory(directory: string): Promise<Game> {
     } catch { /* Artwork is optional. */ }
   }
 
-  const installState = hasFinal && exeExists ? 'ready' : hasTemporary ? 'incomplete' : 'imported';
-  const installMessage = installState === 'incomplete'
+  const updateIncomplete = await hasIncompleteUpdate(canonical);
+  const installState = updateIncomplete ? 'incomplete' : hasFinal && exeExists ? 'ready' : hasTemporary ? 'incomplete' : 'imported';
+  const installMessage = updateIncomplete ? INCOMPLETE_UPDATE_MESSAGE : installState === 'incomplete'
     ? 'A temporary Xodus container was found; the download was not completed.'
     : installState === 'imported' && !hasFinal
       ? 'The .xodus-streaming.msixvc container is missing; Xodus run may not work.'
@@ -240,6 +242,7 @@ export async function inspectGameDirectory(directory: string): Promise<Game> {
     coverDataUrl,
     installState,
     installMessage,
+    updateIncomplete: updateIncomplete || undefined,
     vcRedistEncrypted,
     antiCheat,
     addedAt: new Date().toISOString(),

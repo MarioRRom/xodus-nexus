@@ -18,6 +18,7 @@ import { backendLock } from './backend-package.js';
 import { BackendManager } from './backend.js';
 import { run, spawnTracked } from './process.js';
 import { inspectGameDirectory, StateStore } from './store.js';
+import { hasIncompleteUpdate, INCOMPLETE_UPDATE_MESSAGE } from './installation-state.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { CatalogService } from './catalog.js';
@@ -284,6 +285,12 @@ async function checkGameUpdates(id?: string): Promise<void> {
   }
 }
 
+async function refreshIncompleteUpdate(game: Game): Promise<boolean> {
+  if (!await hasIncompleteUpdate(game.path)) return false;
+  await store.patchGame(game.id, { installState: 'incomplete', updateIncomplete: true, installMessage: INCOMPLETE_UPDATE_MESSAGE });
+  return true;
+}
+
 function emitSnapshot(): void {
   if (snapshotTimer) clearTimeout(snapshotTimer);
   snapshotTimer = undefined;
@@ -537,6 +544,7 @@ async function prepareContentInstall(id: string, productId: string, selectedCont
 
 async function prepareInstall(request: InstallRequest, updateGame?: Game, content?: { game: Game; pkg: ContentPackage; manager: GameContent }, resumed?: DownloadTask): Promise<string> {
   const binary = requireBackend('streaming');
+  if (updateGame && !backend.current.capabilities.streamingUpdateRecovery) throw Error('Update the Nexus backend in Settings before updating installed games safely.');
   const productId = safeProductId(request.productId);
   const market = currentMarket();
   let selectedContentId: string | undefined;
@@ -706,17 +714,27 @@ async function runDownload(task: DownloadTask, binary: string, market: string, u
       try { await content.manager.complete(content.game, content.pkg); }
       catch (error) { task.status = 'failed'; task.error = (error as Error).message; task.phase = 'Content metadata validation failed. Files were kept for repair.'; }
     }
-    await store.updateDownload(id, task);
-    if (task.status === 'complete' && !content) {
+    if (!content && (task.status === 'complete' || updateGame)) {
       try {
         const inspected = await inspectGameDirectory(destination);
         if (updateGame) {
-          await store.patchGame(updateGame.id, { installState: inspected.installState, installMessage: inspected.installMessage, antiCheat: inspected.antiCheat, vcRedistEncrypted: inspected.vcRedistEncrypted, coverDataUrl: inspected.coverDataUrl, storeId: inspected.storeId ?? updateGame.storeId, installedVersion: inspected.installedVersion, packageName: inspected.packageName });
-          delete gameUpdates[updateGame.id];
+          await store.patchGame(updateGame.id, { installState: inspected.installState, installMessage: inspected.installMessage, updateIncomplete: inspected.updateIncomplete, antiCheat: inspected.antiCheat, vcRedistEncrypted: inspected.vcRedistEncrypted, coverDataUrl: inspected.coverDataUrl, storeId: inspected.storeId ?? updateGame.storeId, installedVersion: inspected.installedVersion, packageName: inspected.packageName });
+          if (task.status === 'complete') {
+            if (inspected.installState !== 'ready') throw Error(inspected.installMessage ?? 'The installation is not ready for Xodus run.');
+            delete gameUpdates[updateGame.id];
+          }
         }
         else await store.upsertGame({ ...inspected, offerProductId: /^[A-Z0-9]{12}$/.test(task.productId) ? task.productId : undefined });
-      } catch { /* Some packages do not expose metadata yet. */ }
+      } catch (error) {
+        if (updateGame) await refreshIncompleteUpdate(updateGame).catch(() => {});
+        if (updateGame && task.status === 'complete') {
+          task.status = 'failed'; task.error = (error as Error).message;
+          task.phase = 'Update validation failed. Resume the update before playing.';
+        }
+        // Some new packages do not expose metadata yet. Never erase their files.
+      }
     }
+    await store.updateDownload(id, task);
     if (task.status === 'complete') await downloadCleanup.complete(task);
     operations.delete(id);
     emitSnapshot();
@@ -730,6 +748,7 @@ async function runDownload(task: DownloadTask, binary: string, market: string, u
     task.error = cancelled ? undefined : (error as Error).message;
     task.phase = cancelled ? 'Cancelled by user' : 'The process could not be started';
     task.finishedAt = new Date().toISOString();
+    if (updateGame) await refreshIncompleteUpdate(updateGame).catch(() => {});
     await store.updateDownload(id, task);
     emitSnapshot();
   });
@@ -858,10 +877,12 @@ async function prepareGameLaunch(id: string): Promise<void> {
   for (const task of store.downloads.filter(task => ['running', 'queued', 'paused'].includes(task.status))) {
     if (task.gameId === id || installPathsOverlap(target, await canonicalInstallPath(task.destination))) throw Error('Finish or cancel this game\'s installation before playing it.');
   }
+  if (await refreshIncompleteUpdate(game)) { emitSnapshot(); throw Error(INCOMPLETE_UPDATE_MESSAGE); }
   const inspected = await inspectGameDirectory(game.path);
   await store.patchGame(id, {
     installState: inspected.installState,
     installMessage: inspected.installMessage,
+    updateIncomplete: inspected.updateIncomplete,
     executable: inspected.executable,
     antiCheat: inspected.antiCheat,
     vcRedistEncrypted: inspected.vcRedistEncrypted,
@@ -1403,7 +1424,7 @@ function registerIpc(): void {
   ipcMain.handle('update-installed-game', async (_event, id: string) => {
     const game = store.games.find((entry) => entry.id === id);
     if (!game) throw new Error('Game not found.');
-    if (!game.storeId || game.installState !== 'ready') throw new Error('This game has no verified Store ID or complete installation to update.');
+    if (!game.storeId || !await refreshIncompleteUpdate(game) && (await inspectGameDirectory(game.path)).installState !== 'ready') throw new Error('This game has no verified Store ID or complete installation to update.');
     return startInstall({ productId: game.storeId, title: game.title, destination: game.path }, game);
   });
   ipcMain.handle('download-cancel-options', async (_event, id: string) => {
@@ -1898,6 +1919,7 @@ app.whenReady().then(async () => {
       await store.patchGame(game.id, {
         installState: inspected.installState,
         installMessage: inspected.installMessage,
+        updateIncomplete: inspected.updateIncomplete,
         executable: inspected.executable,
         antiCheat: inspected.antiCheat,
         vcRedistEncrypted: inspected.vcRedistEncrypted,
@@ -1906,7 +1928,10 @@ app.whenReady().then(async () => {
         installedVersion: inspected.installedVersion,
         packageName: inspected.packageName,
       });
-    } catch { /* Keep an unavailable imported entry visible. */ }
+    } catch {
+      await refreshIncompleteUpdate(game).catch(() => {});
+      // Keep unavailable entries visible, without clearing any update barrier.
+    }
   }
   runtime = new RuntimeManager(store.settings.runtimeRoot, emitLog, () => downloadCancellations.size > 0 || operations.size > 0 || installQueue.size > 0 || preparingInstall || backend?.current.updating === true);
   backend = new BackendManager(app.getPath('userData'), store.settings.externalXodusRoot, emitLog, () => keyringSupport.busy || downloadCancellations.size > 0 || operations.size > 0 || installQueue.size > 0 || preparingInstall || runtime?.current.updating === true);

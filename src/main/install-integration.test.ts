@@ -172,7 +172,7 @@ it.each(['market','winePath','externalXodusRoot','runtimeRoot'] as const)
 beforeAll(async () => {
   h.root = await fs.mkdtemp(path.join(os.tmpdir(), 'nexus-install-integration-'));
   h.wine = path.join(h.root, 'runtime', 'wine'); await fs.mkdir(path.dirname(h.wine)); await fs.writeFile(h.wine, 'fixture', { mode: 0o700 });
-  const data = demoSnapshot(); h.backend = { ...data.backend, capabilities: { ...data.backend.capabilities, packageSelection: true }, binaryPath: path.join(h.root, 'synthetic-cli'), linuxRunPatch: 'test-patch' }; h.runtime = data.runtime;
+  const data = demoSnapshot(); h.backend = { ...data.backend, capabilities: { ...data.backend.capabilities, packageSelection: true, streamingUpdateRecovery: true }, binaryPath: path.join(h.root, 'synthetic-cli'), linuxRunPatch: 'test-patch' }; h.runtime = data.runtime;
   const store = new StateStore(path.join(h.root, 'userData'));
   await store.setSettings({ firstRunCompleted: true, market: 'US', runtimeRoot: path.join(h.root, 'runtime'), winePath: h.wine });
   h.savedPausedId=randomUUID();
@@ -515,6 +515,67 @@ it('shows safe specific licensing guidance on failed launch and preserves later 
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
+});
+
+it('keeps interrupted updates blocked after cancellation and queue removal, then permits verified recovery (#405)', async () => {
+  const directory = path.join(h.root, 'update-recovery'); await fs.mkdir(directory);
+  await fs.writeFile(path.join(directory, 'MicrosoftGame.config'), '<Game><Identity Name="Recovery.Base" Version="1.0.0.0"/><ShellVisuals DefaultDisplayName="Recovery game"/><ExecutableList><Executable Name="Recovery.exe"/></ExecutableList><StoreId>9RRRRRRRRRRR</StoreId></Game>');
+  await fs.writeFile(path.join(directory, 'Recovery.exe'), 'MZ old fixture');
+  await fs.writeFile(path.join(directory, '.xodus-streaming.msixvc'), 'old fixture metadata');
+  const game = await ipc('import-game', directory), marker = path.join(directory, '.nexus-update-incomplete-v1');
+  const launches = h.launchEnvironments.length;
+  const notifications = h.notifications.length;
+  const row = (id: string) => snapshot().downloads.find((task: any) => task.id === id);
+  const installed = () => snapshot().games.find((entry: any) => entry.id === game.id);
+  h.backend.capabilities.streamingUpdateRecovery = false;
+  const count = h.downloads.length;
+  await expect(ipc('update-installed-game', game.id)).rejects.toThrow('Update the Nexus backend');
+  expect(h.downloads).toHaveLength(count);
+  expect(await fs.access(marker).then(() => true, () => false)).toBe(false);
+  h.backend.capabilities.streamingUpdateRecovery = true;
+  const start = async () => {
+    h.downloads.splice(0);
+    const id = await ipc('update-installed-game', game.id);
+    await vi.waitFor(() => expect(h.downloads).toHaveLength(1));
+    return id as string;
+  };
+  const cancelled = await start();
+  await fs.writeFile(marker, ''); // Model backend replacing the first file.
+  await fs.writeFile(path.join(directory, 'Recovery.exe'), 'MZ new fixture');
+  await ipc('cancel-download', cancelled, 'keep');
+  expect(row(cancelled).status).toBe('cancelled');
+  expect(installed()).toMatchObject({ installState: 'incomplete', updateIncomplete: true });
+  await ipc('remove-download', cancelled);
+  await ipc('clear-finished-downloads');
+  const restarted = new StateStore(path.join(h.root, 'userData')); await restarted.load();
+  expect(restarted.games.find(entry => entry.id === game.id)).toMatchObject({ installState: 'incomplete', updateIncomplete: true });
+  await expect(ipc('launch-game', game.id)).rejects.toThrow('Resume the update');
+  expect(h.launchEnvironments).toHaveLength(launches);
+  // Reimporting or deleting queue history cannot erase the on-disk barrier.
+  expect(await ipc('import-game', directory)).toMatchObject({ installState: 'incomplete', updateIncomplete: true });
+  const manifest = path.join(directory, 'MicrosoftGame.config');
+  await fs.rename(manifest, manifest + '.saved');
+  await expect(ipc('launch-game', game.id)).rejects.toThrow('Resume the update');
+  const failed = await start(); // Recovery must still work if the interrupted manifest is missing.
+  await fs.rename(manifest + '.saved', manifest);
+  h.downloads[0].finish(1);
+  await vi.waitFor(() => expect(row(failed).status).toBe('failed'));
+  expect(installed().updateIncomplete).toBe(true);
+  const unconfirmed = await start();
+  h.downloads[0].progress(false, 'complete'); h.downloads[0].finish(0);
+  await vi.waitFor(() => expect(row(unconfirmed).status).toBe('failed'));
+  expect(row(unconfirmed).error).toContain('Resume the update');
+  expect(h.notifications).toHaveLength(notifications);
+  const recovered = await start();
+  await fs.unlink(marker); // Only a successful native metadata commit removes it.
+  h.downloads[0].progress(false, 'complete'); h.downloads[0].finish(0);
+  await vi.waitFor(() => expect(row(recovered).status).toBe('complete'));
+  await vi.waitFor(() => expect(h.notifications).toHaveLength(notifications + 1));
+  expect(installed()).toMatchObject({ installState: 'ready' });
+  expect(installed().updateIncomplete).toBeUndefined();
+  expect(await fs.readFile(path.join(directory, 'Recovery.exe'), 'utf8')).toBe('MZ new fixture');
+  await ipc('remove-game', game.id, 'library');
+  h.downloads.splice(0); h.notifications.splice(notifications);
 });
 
 it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/download safely', async () => {
