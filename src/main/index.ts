@@ -116,6 +116,12 @@ function runtimeInvitation(id:unknown){
 }
 function guideAuth():AuthStatus{return{running:authState.running,stored:authState.stored,username:authState.stored?'current':undefined,gamertag:accountProfile?.value?.gamertag,avatarDataUrl:accountProfile?.value?.avatarDataUrl,note:''};}
 function availableNativeInvite(){return [...gameInviteBridges.values()].find(bridge=>bridge.state().active.length);}
+function nativeInviteAvailability(){
+ const bridge=availableNativeInvite();
+ if(bridge)return {canInvite:true,gameId:bridge.id,title:bridge.game};
+ const running=gameOperation?.kind==='launch'&&['preparing','running'].includes(gameOperation.status);
+ return {canInvite:false,reason:running?(gameInviteUnavailableReason??'The game has not enabled invitations yet. Start an online session.'):'Start an online game session to invite someone.'};
+}
 
 let chatWindows:XboxChatWindows;
 const chatReads=new XboxChatReads(nativeSocialConnection,state=>{
@@ -164,6 +170,7 @@ const installQueue = new InstallQueue(() => finishShortcutSession());
 const gameDisplay = new GameDisplayBlocker(powerSaveBlocker);
 const serviceSessions = new Map<string, XodusServiceSession>();
 const gameInviteBridges=new Map<string,GameInviteBridge>();
+let gameInviteUnavailableReason:string|undefined;
 const preparationControllers = new Map<string, AbortController>();
 let gameOperation: GameOperation | undefined;
 let gameRemovalInProgress = false;
@@ -1042,6 +1049,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
   const launchLog = createWriteStream(logPath, { flags: 'w', encoding: 'utf8' });
   launchLog.on('error', (error) => console.error(`Unable to write launch log ${logPath}:`, error));
   const writeLaunchLog = (line: string) => launchLog.write(`[${new Date().toISOString()}] ${line}\n`);
+  gameInviteUnavailableReason=undefined;
   gameOperation = {
     id: operationId,
     gameId: id,
@@ -1139,7 +1147,9 @@ async function prepareGameLaunch(id: string): Promise<void> {
       environment.XODUS_SAVE_SYNC = 'auto';
       addGameLog('Xbox cloud save preview is enabled. Saves may download from and upload to the account cloud.');
     }
-    if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&await gameInviteRuntime(wine)){
+    const inviteRuntime=await gameInviteRuntime(wine);
+    gameInviteUnavailableReason=!inviteRuntime?'The selected runtime does not support game invitations. Update the runtime and restart the game.':!titleId?'The game has no Xbox title information for invitations.':undefined;
+    if(titleId&&/^[a-f0-9]{1,8}$/i.test(titleId)&&inviteRuntime){
       const account=authState.username,epoch=xboxSocial.epoch;
       const current=()=>!shutdownStarted&&authState.stored===true&&authState.username===account&&xboxSocial.epoch===epoch;
       inviteBridge=new GameInviteBridge(operationId,game.title,String(parseInt(titleId,16)),current,emitSnapshot,()=>{void showFriends().catch(()=>{});},Date.now,sender=>{
@@ -1149,7 +1159,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       try{
         await inviteBridge.start();gameInviteBridges.set(operationId,inviteBridge);
         environment.NEXUS_INVITE_PORT=String(inviteBridge.port);environment.NEXUS_INVITE_KEY=inviteBridge.key;
-      }catch{await inviteBridge.stop().catch(()=>{});inviteBridge=undefined;addGameLog('Optional game invitations are unavailable for this launch.');}
+      }catch{await inviteBridge.stop().catch(()=>{});inviteBridge=undefined;gameInviteUnavailableReason='The game invitation connection could not be started. Restart the game to try again.';addGameLog('Optional game invitations are unavailable for this launch.');}
     }
     // Names the account for the runtime's offline identity cache (an opaque key, never the username).
     if (authState.stored === true && authState.username) environment.XODUS_ACCOUNT_HASH = accountCacheKey(authState.username);
@@ -1476,7 +1486,7 @@ function registerIpc(): void {
   });
   ipcMain.handle('xbox-desktop-profile',event=>{socialSender(event);return event.sender===mainWindow?.webContents?desktopProfileRequest:undefined;});
 
- ipcMain.handle('xbox-game-invite-availability',event=>{socialSender(event);const bridge=availableNativeInvite();return bridge?{canInvite:true,gameId:bridge.id,title:bridge.game}:{canInvite:false,reason:'Start an online game session to invite someone.'};});
+ ipcMain.handle('xbox-game-invite-availability',event=>{socialSender(event);return nativeInviteAvailability();});
  ipcMain.handle('xbox-game-invite-send',(event,xuid:string)=>{socialSender(event);const bridge=availableNativeInvite();if(!bridge)throw Error('Start an online game session to invite someone.');bridge.invite(xuid);});
 
  ipcMain.handle('pop-out-xbox-chat',(event,xuid:unknown)=>{socialSender(event);if(!nativeSocialConnection())throw Error('Sign in through Nexus to open this chat.');return chatWindows.show(xuid);});
@@ -2273,7 +2283,7 @@ app.whenReady().then(async () => {
      case 'getXboxInbox':return xboxNativeSocial.inbox();
      case 'getXboxConversation':return xboxNativeSocial.conversation(text(0));
      case 'sendXboxMessage':if(text(0)!=='current')throw Error('Xbox account changed.');return xboxNativeSocial.send(nativeSocialConnection()!.account,text(1),text(2));
-     case 'getXboxGameInviteAvailability':{const bridge=availableNativeInvite();return bridge?{canInvite:true,gameId:bridge.id,title:bridge.game}:{canInvite:false,reason:'Start an online game session to invite someone.'};}
+     case 'getXboxGameInviteAvailability':return nativeInviteAvailability();
      case 'sendXboxGameInvite':{const bridge=availableNativeInvite();if(!bridge)throw Error('Start an online game session to invite someone.');return bridge.invite(text(0));}
      case 'chooseGameInviteRecipient':{const value=runtimeInvitation(text(0));return value.bridge.choose(value.id,text(1));}
      case 'cancelGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.cancel(value.id);}

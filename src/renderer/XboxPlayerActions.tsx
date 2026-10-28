@@ -2,6 +2,7 @@ import {ui} from './i18n';
 import {useEffect,useRef,useState} from 'react';
 import {Ban,Check,ExternalLink,Gamepad2,Headset,LoaderCircle,MessageCircle,RefreshCw,Star,UserMinus,UserPlus,X} from 'lucide-react';
 import type {XboxGameInviteAvailability,XboxRelationship,XboxRelationshipAction,XboxSocialApi} from '../shared/types';
+import {watchGameInviteAvailability} from './game-invite-availability';
 
 const failure=(value:unknown)=>value instanceof Error?value.message.replace(/^Error invoking remote method '[^']+': Error: /,''):'Xbox could not complete this action.';
 export function xboxRelationshipOptions(value:XboxRelationship):{action:XboxRelationshipAction;label:string;confirm?:boolean}[]{
@@ -30,17 +31,20 @@ export function XboxPlayerActions({api,account,xuid,gamertag,chat,party,openProf
  const [loading,setLoading]=useState(true),[pending,setPending]=useState(false),[problem,setProblem]=useState<string>(),[note,setNote]=useState<string>();
  const [confirmation,setConfirmation]=useState<XboxRelationshipAction>(),[uncertain,setUncertain]=useState(false);
  const generation=useRef(0),working=useRef(false);
+ const inviteRefresh=useRef<()=>Promise<void>>();
  const menuButton=compact?{role:'menuitem' as const}:{};
  async function refresh(){
   const current=++generation.current;setLoading(true);setProblem(undefined);setConfirmation(undefined);
+  void inviteRefresh.current?.();
   try{const value=await api.getXboxRelationship(xuid);if(current===generation.current){setRelationship(value);setUncertain(false);}}
   catch(error){if(current===generation.current)setProblem(failure(error));}
   finally{if(current===generation.current)setLoading(false);}
  }
  useEffect(()=>{
   setRelationship(undefined);setAvailability(undefined);setPending(false);setNote(undefined);setUncertain(false);working.current=false;
-  void refresh();let alive=true;void api.getXboxGameInviteAvailability().then(value=>{if(alive)setAvailability(value);},()=>{if(alive)setAvailability({canInvite:false,reason:'Xbox could not check game invitations.'});});
-  return()=>{alive=false;generation.current++;};
+  const watcher=watchGameInviteAvailability(()=>api.getXboxGameInviteAvailability(),setAvailability);inviteRefresh.current=watcher.refresh;
+  void refresh();
+  return()=>{watcher.stop();inviteRefresh.current=undefined;generation.current++;};
  },[api,account,xuid]);
  async function change(action:XboxRelationshipAction){
   if(working.current||uncertain)return;working.current=true;const current=generation.current;setPending(true);setProblem(undefined);setNote(undefined);setConfirmation(undefined);
@@ -54,7 +58,7 @@ export function XboxPlayerActions({api,account,xuid,gamertag,chat,party,openProf
  }
  async function invite(){
   if(working.current||!availability?.canInvite)return;working.current=true;const current=generation.current;setPending(true);setProblem(undefined);setNote(undefined);
-  try{await api.sendXboxGameInvite(xuid);if(current===generation.current)setNote('Game invitation sent.');}
+  try{await api.sendXboxGameInvite(xuid);if(current===generation.current)setNote('Sending game invitation. Check its status in Friends.');}
   catch(error){if(current===generation.current)setProblem(failure(error)+' The invitation was not retried.');}
   finally{if(current===generation.current){working.current=false;setPending(false);}}
  }
