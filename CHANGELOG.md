@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Overlap local data verification and staged writes during game updates without changing checkpoint recovery.
 - Reduce download preparation time and memory use while preserving existing update checkpoints.
 - Improve game download and update performance with batched writes, parallel update transfers and fewer repeated local reads.
 - Add a redesigned Social panel with conversations, player profiles and friend management. Thanks @Rbanh.

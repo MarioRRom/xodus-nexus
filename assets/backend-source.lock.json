@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v68",
+  "patchId": "linux-run-v69",
   "compatibility": "linux-run-v25",
   "patches": [
     {
@@ -271,6 +271,10 @@
     {
       "file": "xodus-metadata-throughput.patch",
       "sha256": "b439a9dfe5ac99170c8d9991a4299b1da498965b427aba852cf110e1e5ebd7a0"
+    },
+    {
+      "file": "xodus-reuse-pipeline.patch",
+      "sha256": "dc1b4a729de2d043153a7fcf8ee64f0278fb7f2a23ca8011ae29ccdf2cdff202"
     }
   ]
 }

@@ -6,9 +6,32 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
+test('reused-data pipeline retains bounded lookahead and inode-bound data-before-journal checkpoints', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(p => p.file === 'xodus-reuse-pipeline.patch'); assert.ok(entry);
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.ok(lock.patches.indexOf(entry) > lock.patches.findIndex(p => p.file === 'xodus-metadata-throughput.patch'));
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(m => m[1]), [
+    'crates/xodus-cli/src/commands/streaming.rs', 'crates/xodus-cli/src/commands/streaming_resume.rs',
+    'crates/xodus-cli/src/commands/streaming_update.rs', 'crates/xodus-cli/src/commands/streaming_update_throughput_tests.rs',
+  ]);
+  for (const name of ['streaming_update_pipeline_builds_relocation_index_only_when_needed',
+    'streaming_update_pipeline_overlaps_but_settles_current_write_before_lookahead_failure',
+    'streaming_update_pipeline_write_failure_cancels_lookahead_without_detached_work',
+    'streaming_update_pipeline_checkpoint_failure_is_not_retried',
+    'streaming_update_pipeline_pause_keeps_lookahead_out_of_progress_and_resume_checkpoint',
+    'streaming_resume_synced_proof_binds_exact_output_and_preserves_legacy_journal']) assert.ok(patch.includes(name));
+  const added = patch.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
+  assert.match(added, /const REUSE_WINDOW: usize = 8 \* 1024 \* 1024/);
+  assert.match(added, /file\.flush\(\)\.await\?;[\s\S]*file\.sync_data\(\)\.await\?/);
+  assert.match(added, /meta\.dev\(\) != synced\.device \|\| meta\.ino\(\) != synced\.inode/);
+  assert.match(added, /checkpoint_synced\(&job\.name,synced\)/);
+  assert.doesNotMatch(added, /FICLONE|ioctl|tokio::spawn\(|spawn_blocking\(|get_license|\.post\(|\.delete\(/);
+});
 test('metadata preparation batches bounded hash reads and shares a legacy-compatible checkpoint identity', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
-  const entry = lock.patches.at(-1);
+  const entry = lock.patches.find(p => p.file === 'xodus-metadata-throughput.patch'); assert.ok(entry);
   assert.equal(entry.file, 'xodus-metadata-throughput.patch');
   const patch = await fs.readFile('assets/' + entry.file, 'utf8');
   assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
