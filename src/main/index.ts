@@ -28,6 +28,7 @@ import { inspectGameDirectory, StateStore } from './store.js';
 import { hasIncompleteUpdate, INCOMPLETE_UPDATE_MESSAGE } from './installation-state.js';
 import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
+import { layoutOfWine } from './proton-layout.js';
 import { CatalogService } from './catalog.js';
 import { cloudSaveRuntime, gameInviteRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
@@ -900,7 +901,7 @@ async function gameLaunchOptions(id: string): Promise<GameLaunchOptions> {
   const protonRoot = path.resolve(path.dirname(wine), '..', '..');
   const protonAvailable = await Promise.all([
     fs.access(path.join(protonRoot, 'proton'), constants.X_OK).then(() => true, () => false),
-    fs.access(path.join(protonRoot, 'files', 'share', 'default_pfx'), constants.R_OK).then(() => true, () => false),
+    fs.access(path.join(protonRoot, 'files', 'share', layoutOfWine(wine).defaultPrefix), constants.R_OK).then(() => true, () => false),
   ]).then((values) => values.every(Boolean));
   const previewRuntime = await cloudSaveRuntime(wine);
   const servicePath = backend.current.binaryPath ? path.join(path.dirname(backend.current.binaryPath), 'xodus-service') : '';
