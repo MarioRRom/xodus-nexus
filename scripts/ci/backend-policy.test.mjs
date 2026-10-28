@@ -6,6 +6,31 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
+test('metadata preparation batches bounded hash reads and shares a legacy-compatible checkpoint identity', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.at(-1);
+  assert.equal(entry.file, 'xodus-metadata-throughput.patch');
+  const patch = await fs.readFile('assets/' + entry.file, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(m => m[1]), [
+    'crates/msixvc/src/streaming.rs', 'crates/msixvc/src/streaming_hash_cache.rs',
+    'crates/msixvc/src/xvd.rs', 'crates/xodus-cli/src/commands/streaming.rs',
+    'crates/xodus-cli/src/commands/streaming_resume.rs',
+  ]);
+  for (const name of ['streaming_hash_cache_full_xvd_parser_preserves_every_hash_and_encryption_unit',
+    'streaming_hash_cache_batches_strided_reads_and_preserves_backward_and_boundary_bytes',
+    'streaming_hash_cache_never_reads_beyond_declared_section_or_accepts_truncated_data',
+    'streaming_hash_cache_cancelled_fill_is_never_reused',
+    'streaming_resume_streamed_identity_is_byte_compatible_and_binds_every_layout_field',
+    'streaming_resume_shared_identity_reopens_legacy_checkpoints_in_both_roots']) assert.ok(patch.includes(name));
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.match(added, /const WINDOW: usize = 1024 \* 1024/);
+  assert.match(added, /BufWriter::with_capacity\(64 \* 1024, &mut digest\)/);
+  assert.match(added, /open_with_identity\(stage, &identity\)/);
+  assert.match(added, /reader.read_exact\(&mut data\).await\?;[\s\S]*self.data = data/);
+  assert.doesNotMatch(added, /ioctl|FICLONE|NEXUS_MEASURE_PHASES|NEXUS_PHASE_V1|\.post\(|\.delete\(|get_license|\.sync_all\(\).*ok\(\)/);
+  assert.ok(!lock.patches.some(p => p.file === 'xodus-update-reflink.patch'));
+});
 test('download and update throughput optimizations preserve bounded writes and durable recovery', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   const paths = [
