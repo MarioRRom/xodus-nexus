@@ -57,6 +57,25 @@ it('installs a hidden portal identity without replacing user-managed desktop ent
  expect(await fs.readFile(file,'utf8')).toContain('Name=User entry');
 });
 
+it('suspends recording without another portal registration and rebinds only on Save',async()=>{
+ const callbacks=new Map<string,()=>void>(),api={register:vi.fn((key:string,cb:()=>void)=>{callbacks.set(key,cb);return true;}),unregister:vi.fn(),setSuspended:vi.fn()},toggle=vi.fn(async()=>{});
+ const enabled=settings({overlayEnabled:true}),shortcut=new XboxOverlayShortcut(api,toggle,vi.fn(),{environment:{WAYLAND_DISPLAY:'fixture'}});
+ await shortcut.configure(enabled);await shortcut.record(enabled,true);callbacks.get('Super+G')!();
+ expect(toggle).not.toHaveBeenCalled();expect(api.setSuspended).toHaveBeenLastCalledWith(true);expect(api.unregister).not.toHaveBeenCalled();
+ await shortcut.record(enabled,false);expect(api.setSuspended).toHaveBeenLastCalledWith(false);expect(api.register).toHaveBeenCalledOnce();expect(shortcut.current.state).toBe('requested');
+ await shortcut.configure({...enabled,overlayShortcut:'Shift+Tab'});expect(api.register).toHaveBeenCalledTimes(2);expect(api.unregister).toHaveBeenCalledOnce();expect(api.unregister).toHaveBeenCalledWith('Super+G');
+ callbacks.get('Super+G')!();expect(toggle).not.toHaveBeenCalled();callbacks.get('Shift+Tab')!();expect(toggle).toHaveBeenCalledOnce();
+ await shortcut.configure(settings());callbacks.get('Shift+Tab')!();expect(toggle).toHaveBeenCalledOnce();await shortcut.shutdown();
+});
+
+it('does not request consent if Guide is disabled while its dependency check is pending',async()=>{
+ let release!:()=>void;const api={register:vi.fn(()=>true),unregister:vi.fn(),setSuspended:vi.fn()},prepare=vi.fn(()=>new Promise<void>(resolve=>{release=resolve;}));
+ const shortcut=new XboxOverlayShortcut(api,async()=>{},vi.fn(),{prepare});
+ const enabled=shortcut.configure(settings({overlayEnabled:true}));await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const disabled=shortcut.configure(settings());release();await enabled;await disabled;
+ expect(api.register).not.toHaveBeenCalled();expect(shortcut.current.state).toBe('disabled');await shortcut.shutdown();
+});
+
 it('does not resurrect registration when preparation or a blur restore finishes after shutdown',async()=>{
  let release!:()=>void;const api={register:vi.fn(()=>true),unregister:vi.fn()};
  const shortcut=new XboxOverlayShortcut(api,async()=>{},vi.fn(),{prepare:()=>new Promise<void>(resolve=>{release=resolve;})});

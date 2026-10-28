@@ -1016,7 +1016,7 @@
   "settings.guide_record_failed": "Could not record the shortcut. Focus Nexus and try again.",
   "settings.guide_record_invalid": "Use a modifier with a letter, number, navigation key or Space; function keys also work.",
   "settings.guide_record_help": "Press a key combination. Escape cancels; Tab leaves without changes.",
-  "settings.guide_shortcut_help": "Click Record, then press your shortcut. Save to apply. Avoid shortcuts reserved by your desktop.",
+  "settings.guide_shortcut_help": "Click Record, then press your shortcut. Save to apply. On Wayland, your desktop may ask you to approve the requested shortcut. Avoid shortcuts reserved by your desktop.",
   "social.in_game_xbox_guide_b68219": "In-game Xbox guide",
   "social.return_to_shelf_4df4fc": "Return to shelf",
   "social.xbox_guide_31c52d": "Nexus Guide",
