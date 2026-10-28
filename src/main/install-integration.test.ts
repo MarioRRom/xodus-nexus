@@ -397,6 +397,13 @@ it('routes a direct Durable through real managed-content admission and completio
   const id='9MMMMMMMMMMM',base='9ZZZZZZZZZZZ',cid='22222222-2222-4222-8222-222222222222';
   const gamePath=path.join(h.root,'installed-game'),before=await fs.readFile(path.join(gamePath,'MicrosoftGame.config'),'utf8');
   const gamesBefore=snapshot().games.length,fetcher=globalThis.fetch;
+  const originalCleanup = DownloadCleanup.prototype.complete;
+  let releaseCleanup!: () => void;
+  const cleanupGate = new Promise<void>(resolve => { releaseCleanup = resolve; });
+  const cleanup = vi.spyOn(DownloadCleanup.prototype, 'complete').mockImplementation(async function(this: DownloadCleanup, task) {
+    await cleanupGate;
+    return originalCleanup.call(this, task);
+  });
   const packageData={ContentId:cid,PackageFormat:'MSIXVC',Architectures:['x64'],PlatformDependencies:[{PlatformName:'Windows.Desktop'}],PackageFamilyName:'Example.Dlc_hash',MainPackageFamilyNameForDlc:'Example.Base_hash'};
   const records=[{ProductId:base,ProductType:'Game',DisplaySkuAvailabilities:[{Sku:{Properties:{IsTrial:false,Packages:[{...packageData,PackageFamilyName:'Example.Base_hash',MainPackageFamilyNameForDlc:undefined}]}}}]},
     {ProductId:id,ProductType:'Durable',LocalizedProperties:[{ProductTitle:'Synthetic DLC'}],DisplaySkuAvailabilities:[{Sku:{Properties:{IsTrial:false,Packages:[packageData]}}}]}];
@@ -419,7 +426,14 @@ it('routes a direct Durable through real managed-content admission and completio
     expect(await fs.readFile(path.join(gamePath,'Game.exe'),'utf8')).toBe('MZ fixture');
     expect(snapshot().games).toHaveLength(gamesBefore);
     expect((await fs.readdir(task.destination))).toContain('.nexus-content-complete.json');
-  }finally{globalThis.fetch=fetcher;h.contentSupported=false;h.downloads.splice(0);h.notifications.splice(0);}
+    // Persisted status is visible before asynchronous cleanup and notification.
+    // Do not clear this fixture while that previous job can still notify later.
+    expect(h.notifications).toEqual([]);
+    releaseCleanup();
+    await vi.waitFor(() => expect(h.notifications).toEqual([
+      expect.objectContaining({ title: 'Content download complete', body: `${task.title} has finished downloading.` }),
+    ]));
+  }finally{releaseCleanup();cleanup.mockRestore();globalThis.fetch=fetcher;h.contentSupported=false;h.downloads.splice(0);h.notifications.splice(0);}
 });
 
 it('gates runtime DLC hints, clears inherited foreign hints and still launches after optional discovery fails without reading accounts',async()=>{
