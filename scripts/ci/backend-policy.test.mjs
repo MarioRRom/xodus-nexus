@@ -810,4 +810,110 @@ test('device registration skips the SMBIOS elevation prompt when the device has 
   const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
   assert.doesNotMatch(added,/sudo|setuid|\/dev\/mem|std::fs::read\(/);
   assert.ok((await fs.readFile('scripts/build-backend.mjs','utf8')).includes("'-p', 'xodus', 'smbios_']"));
+
+});
+
+const offlinePatch = async (file, after) => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(p => p.file === file);
+  assert.ok(entry, file);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.ok(lock.patches.findIndex(p => p.file === file) > lock.patches.findIndex(p => p.file === after), `${file} after ${after}`);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]).sort();
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  return { patch, files, added };
+};
+
+test('offline licenses are device-bound, fail closed and never bypass an online refusal', async () => {
+  const { patch, files, added } = await offlinePatch('xodus-offline-license.patch', 'xodus-content-device-limit.patch');
+  assert.deepEqual(files, [
+    'crates/xodus-cli/src/commands.rs', 'crates/xodus-cli/src/commands/license.rs', 'crates/xodus-cli/src/commands/offline_pc.rs',
+    'crates/xodus-cli/src/commands/run.rs', 'crates/xodus-cli/src/commands/streaming.rs',
+    'crates/xodus-cli/src/license.rs', 'crates/xodus-cli/src/license_cache.rs', 'crates/xodus-cli/src/license_cache_tests.rs',
+    'crates/xodus-cli/src/main.rs',
+    'crates/xodus/src/licensing/content.rs', 'crates/xodus/src/licensing/content_response.rs', 'crates/xodus/src/models/devicecredential.rs',
+  ].sort());
+  // Downloads and the CIK dump keep online-only licensing: those call sites only gain a `None` cache argument.
+  for (const file of ['commands/streaming.rs', 'commands/license.rs']) {
+    const section = patch.split(/^diff --git /m).find(part => part.startsWith(`a/crates/xodus-cli/src/${file} `));
+    assert.ok(section, file);
+    const addedLines = section.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).map(line => line.slice(1).trim());
+    assert.deepEqual(addedLines.filter(line => !line.startsWith('//')),
+      file === 'commands/streaming.rs' ? ['None,'] : ['let license = get_license(client, tokens, content_id, market, None).await;']);
+  }
+  for (const expected of ['"isOffline"', 'pub fn parse_lease', 'pub fn lease_policy',
+    'Refusing to change the offline PC designation without --confirm', 'pcgafd/config/offlinepc', '--license-cache']) assert.ok(patch.includes(expected), expected);
+  // The cache stores Microsoft's encrypted SPLicense block only; the device key stays in the keyring.
+  assert.doesNotMatch(patch, /diff --git a\/.*(?:tokens\/|login\.rs|package_plan\.rs|Cargo|content_response_tests)/);
+  assert.doesNotMatch(added, /"deviceKey"|"contentKey"|unpack\(/);
+  assert.match(added, /OnlineFailure::Refused\(_\) => \{[\s\S]*?purge\(content_id\)/);
+  assert.match(added, /OnlineFailure::Other\(_\) => Err\(message\)/);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.match(build, /command\('cargo', \['test', '--locked', \.\.\.offline, \.\.\.features, '-p', 'xodus-cli'\]\)/);
+});
+
+test('offline launches detect an unreachable Microsoft quickly and skip online-only steps', async () => {
+  const { patch, files } = await offlinePatch('xodus-offline-fast-path.patch', 'xodus-offline-license.patch');
+  assert.deepEqual(files, ['crates/xodus-cli/src/commands/run.rs', 'crates/xodus-cli/src/license.rs', 'crates/xodus-cli/src/main.rs', 'crates/xodus-service/src/simple_context.rs']);
+  // Only the connect phase is bounded; a request timeout would break game streaming.
+  assert.equal((patch.match(/^\+.*connect_timeout\(std::time::Duration::from_secs\(10\)\)/gm) ?? []).length, 2);
+  assert.doesNotMatch(patch, /^\+.*\.timeout\(/m);
+  // The PlayFab step is skipped only when the stored offline license is in use.
+  assert.match(patch, /OFFLINE_LICENSE_USED\.store\(true/);
+  assert.match(patch, /if crate::license::OFFLINE_LICENSE_USED\.load/);
+});
+
+test('launcher-requested offline launches skip Microsoft and survive an expired device token', async () => {
+  const { patch, files } = await offlinePatch('xodus-offline-launch.patch', 'xodus-offline-fast-path.patch');
+  assert.deepEqual(files, ['crates/xodus-cli/src/commands/license.rs', 'crates/xodus-cli/src/commands/run.rs', 'crates/xodus-cli/src/commands/streaming.rs', 'crates/xodus-cli/src/license.rs', 'crates/xodus-cli/src/main.rs']);
+  // The flag exists only together with a license cache and is the launcher's verdict, not a guess made here.
+  assert.match(patch, /^\+\s*requires = "license_cache",/m);
+  assert.match(patch, /matches!\(args\.command, SubCommand::Run \{ offline: true, \.\. \}\)/);
+  assert.match(patch, /OnlineFailure::Unreachable\("Microsoft is unreachable \(offline launch requested\)\."/);
+  assert.match(patch, /command\.env\("XODUS_FORCE_OFFLINE", "1"\)/);
+  // A failed device renewal is tolerated only for launches with a license cache and a stored device license.
+  assert.match(patch, /launch_with_license_cache && tokens\.get_device_license\(\)\.is_ok\(\)/);
+  assert.match(patch, /needs_device_credentials && !offline_launch/);
+  assert.match(patch, /get_license\(client, tokens, content_id, market, None, false\)/);
+  assert.doesNotMatch(patch, /^\+.*\.timeout\(/m);
+});
+
+test('stored offline licenses are re-validated against their lease and revoked on every known designation, account or refusal change', async () => {
+  const { patch, files, added } = await offlinePatch('xodus-offline-license-revocation.patch', 'xodus-offline-launch.patch');
+  assert.deepEqual(files, ['crates/xodus-cli/src/commands/offline_pc.rs', 'crates/xodus-cli/src/commands/run.rs', 'crates/xodus-cli/src/license.rs',
+    'crates/xodus-cli/src/license_cache.rs', 'crates/xodus-cli/src/license_cache_tests.rs', 'crates/xodus-cli/src/main.rs']);
+  // Loading parses the stored lease document again; Nexus-written expiry fields grant nothing.
+  assert.match(added, /pub fn check_lease\(document: &str, key: &License, issued_at: u64, now: u64\) -> LeaseCheck/);
+  assert.match(added, /let expires_at = match check_lease\(&lease, &key, issued_at, now\)/);
+  assert.doesNotMatch(added, /"expiresAt": (?:expires_at|offline_expiry)/);
+  for (const rule of ['LicenseType::Lease', 'policy.is_offline', 'binding_type.eq_ignore_ascii_case("Machine")', 'lease_device != key_device',
+    'expiration_date', 'issued_at.saturating_add(MAX_OFFLINE_SECONDS)', 'CLOCK_SKEW_SECONDS']) assert.ok(added.includes(rule), rule);
+  // Revocations: not designated (User-bound key or offline-pc false), a designation change, another holder, refusals.
+  assert.match(added, /if !license\.key\.binding\.binding_type\.eq_ignore_ascii_case\("Machine"\) \{\s*\+\s*match cache\.revoke_all\(\)/);
+  assert.match(added, /fn designation_revokes\(set: Option<bool>, summary: &Value\) -> bool/);
+  assert.match(added, /LicenseContentError::DeviceLimit => OnlineFailure::DeviceRefused\(message\)/);
+  assert.match(added, /OnlineFailure::DeviceRefused\(_\) => \{[\s\S]*?revoke_all\(\)/);
+  assert.match(added, /text\("deviceId"\)\.as_deref\(\) != Some\(holder\.device_id\.as_str\(\)\)/);
+  // The runtime's offline identity follows the license decision.
+  assert.match(added, /command\.env_remove\("XODUS_OFFLINE_IDENTITY"\)/);
+  for (const name of ['lease_restrictions_come_from_the_lease_microsoft_issued',
+    'expired_leases_are_refused_and_removed_whatever_the_local_file_claims', 'a_swapped_lease_document_is_validated_again',
+    'a_clock_set_back_cannot_stretch_offline_use', 'another_account_or_device_registration_removes_every_stored_license',
+    'switching_the_designation_from_a_to_b_ends_offline_play_on_a_when_it_reconnects', 'expired_leases_fail_closed_and_disappear',
+    'an_account_change_removes_every_stored_license', 'explicit_licensing_refusals_remove_stored_licenses',
+    'stored_offline_licenses_end_when_this_device_is_not_or_no_longer_designated',
+    'the_runtime_offline_identity_follows_the_license_decision',
+    'the_device_registration_is_identified_even_without_a_license_device_id',
+    'lease_dates_are_read_in_the_formats_microsoft_uses']) assert.ok(patch.includes(`fn ${name}(`), name);
+  // Still no key material, credentials or new network requests.
+  assert.doesNotMatch(added, /"deviceKey"|"contentKey"|unpack\(|\.post\(|\.send\(|save_device_license\(&device\)|remove_device_license/);
+  const stages = await fs.readFile('src/shared/content-license.ts', 'utf8');
+  for (const stage of ['content-cache-stored', 'content-cache-skipped', 'content-cache-write-failed', 'content-cache-used', 'content-cache-missing',
+    'content-cache-expired', 'content-cache-invalid', 'content-cache-purged', 'content-cache-revoked', 'content-cache-account', 'content-cache-clock']) {
+    assert.ok(stages.includes(`'${stage}'`), stage);
+  }
+  for (const stage of ['content-cache-revoked', 'content-cache-account', 'content-cache-clock']) {
+    assert.ok(added.includes(`"${stage}"`), stage);
+  }
 });

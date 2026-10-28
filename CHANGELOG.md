@@ -11,6 +11,8 @@
 - Show unread conversations and game updates in a notification bell beside the account, and open chats at the latest message.
 - Reduce disk space and downloads for game updates by reusing verified local data, and support recovery of interrupted updates. Thanks @Rbanh.
 - Remove abandoned temporary game launch directories while preserving active sessions and directories without a usable session lock. Thanks @xerhab.
+- Play installed games offline on the account's designated offline device, as the Xbox app allows: a game launched once while online keeps Microsoft's offline lease, and the stored license is checked against that lease again at every offline launch. **Settings → Offline permissions** shows and changes the designation.
+- Remove stored offline licenses and offline sign-ins whenever offline play ends: turning it off, Microsoft reporting another device as the offline device, another account, sign-out, or a licensing refusal.
 - Fix Xbox sign-in, downloads and profiles failing with "Xbox authentication request failed" for accounts that receive compact JWE delegation tickets; other tickets are unchanged. Thanks @burghr.
 - Skip the administrator password prompt for hardware data at sign-in on devices without a firmware SMBIOS table, such as most ARM devices; other devices are unchanged.
 - Handle reordered game sign-in responses and return authentication failures without crashing the account service.

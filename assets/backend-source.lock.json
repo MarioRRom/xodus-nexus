@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v70",
+  "patchId": "linux-run-v71",
   "compatibility": "linux-run-v25",
   "patches": [
     {
@@ -279,6 +279,22 @@
     {
       "file": "xodus-smbios-optional.patch",
       "sha256": "ddbfd1aaade3dedc4659ee69676301d56d7f53c74a30d9de7e12d4ac38608179"
+    },
+    {
+      "file": "xodus-offline-license.patch",
+      "sha256": "ff882b6132e77434ef015e961b603382b2a7cffcba6ccc716c0b92a9c9b7639d"
+    },
+    {
+      "file": "xodus-offline-fast-path.patch",
+      "sha256": "0062f4ff46373a30b83a235a5862908d0f52c9cac5d7c916be17053e4b151d65"
+    },
+    {
+      "file": "xodus-offline-launch.patch",
+      "sha256": "2ff332a61a0ad8400d11b1c6370eab4c0a09a090a4dd7cacb483ed9bc5f96c1d"
+    },
+    {
+      "file": "xodus-offline-license-revocation.patch",
+      "sha256": "d9363ca35087ea10eed2b8ba6c9d9a6f770384ce16da141b113ff83e1ac36776"
     }
   ]
 }
