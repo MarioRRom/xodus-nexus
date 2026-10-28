@@ -45,6 +45,31 @@ test('launch views left by killed sessions are swept only when no process holds 
   assert.doesNotMatch(added,/get_license|tokens\.|full_key|set_permissions|mount\(|chmod/);
 });
 
+test('launch-view cleanup preserves lockless sessions and publishes only fully prepared locks (#399)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const filename = 'xodus-launch-view-safety.patch';
+  const entry = lock.patches.find(value => value.file === filename);
+  assert.ok(entry);
+  assert.ok(lock.patches.findIndex(value => value.file === filename)
+    > lock.patches.findIndex(value => value.file === 'xodus-launch-view-sweep.patch'));
+  const patch = await fs.readFile(`assets/${filename}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]),
+    ['crates/xodus-cli/src/commands/run.rs']);
+  for (const name of ['launch_view_sweep_preserves_lockless_views_regardless_of_age',
+    'launch_view_lock_failure_keeps_launching_and_never_sweeps_the_live_view',
+    'launch_view_failed_lock_preparation_never_publishes_an_unheld_lock',
+    'launch_view_lock_publication_never_replaces_an_existing_lock',
+    'launch_view_sweep_keeps_old_views_with_invalid_locks',
+    'launch_view_sweep_keeps_concurrent_live_sessions',
+    'launch_view_child_holds_lock_after_owner_is_killed']) assert.ok(patch.includes(name), name);
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.match(added, /prepare\(staging\.as_file\(\)\)\?;[\s\S]*staging\.persist_noclobber\(path\)/);
+  assert.match(added, /file\.metadata\(\)\?\.is_file\(\)/);
+  assert.match(patch, /Err\(_\) => false/);
+  assert.doesNotMatch(added, /UNLOCKED_LAUNCH_VIEW_MAX_AGE|modified\.elapsed\(\)|get_license|tokens\.|full_key/);
+});
+
 test('plain-region metadata supplements launch images without replacing encrypted declarations (#417)', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   const entries = ['xodus-plain-region-images.patch', 'xodus-plain-region-regressions.patch'];
