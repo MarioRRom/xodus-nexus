@@ -797,3 +797,17 @@ test('chat JSON output remains strict and uses quiet equivalent policy selection
   assert.doesNotMatch(added,/println!|\.post\(|\.send\(|\.save_|ensure_device_credentials|\.header\(|\.json\(/);
   assert.ok((await fs.readFile('src/main/xbox-social.ts','utf8')).includes('JSON.parse(output)'));
 });
+
+test('device registration skips the SMBIOS elevation prompt when the device has no firmware table', async () => {
+  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+  const entry=lock.patches.find(value=>value.file==='xodus-smbios-optional.patch');assert.ok(entry);
+  const patch=await fs.readFile('assets/'+entry.file,'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+  assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus/src/hardware.rs']);
+  for(const name of ['fn load_raw_smbios_from(','if !table.exists() {','io::ErrorKind::NotFound','smbios_missing_table_does_not_start_pkexec'])assert.ok(patch.includes(name),name);
+  // The elevated read itself is unchanged: the same pkexec cat of the same table.
+  assert.ok(patch.includes('const SMBIOS_SYSTEM_TABLE: &str = "/sys/firmware/dmi/entries/1-0/raw";'));
+  const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+  assert.doesNotMatch(added,/sudo|setuid|\/dev\/mem|std::fs::read\(/);
+  assert.ok((await fs.readFile('scripts/build-backend.mjs','utf8')).includes("'-p', 'xodus', 'smbios_']"));
+});

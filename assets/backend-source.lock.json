@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v69",
+  "patchId": "linux-run-v70",
   "compatibility": "linux-run-v25",
   "patches": [
     {
@@ -275,6 +275,10 @@
     {
       "file": "xodus-reuse-pipeline.patch",
       "sha256": "dc1b4a729de2d043153a7fcf8ee64f0278fb7f2a23ca8011ae29ccdf2cdff202"
+    },
+    {
+      "file": "xodus-smbios-optional.patch",
+      "sha256": "ddbfd1aaade3dedc4659ee69676301d56d7f53c74a30d9de7e12d4ac38608179"
     }
   ]
 }
