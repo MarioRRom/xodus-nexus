@@ -18,7 +18,7 @@ import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-band
 import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cache.js';
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
 import { backendLock } from './backend-package.js';
-import {XboxGameGuide} from './xbox-game-guide.js';
+import {XboxGameGuide,checkGuideHost} from './xbox-game-guide.js';
 import {XboxOverlayShortcut,ensureOverlayDesktopEntry} from './xbox-overlay-shortcut.js';
 import {xboxOverlaySettings,xboxOverlayPatch} from '../shared/xbox-overlay-settings.js';
 import { BackendManager } from './backend.js';
@@ -1779,6 +1779,7 @@ function registerIpc(): void {
     const settings = await store.setSettings(allowed);
     if(Object.keys(xboxOverlayPatch(patch)).length){
       await overlayShortcut?.configure(settings);gameGuide?.publish('overlay',xboxOverlaySettings(settings));
+      if(!xboxOverlaySettings(settings).overlayEnabled)gameGuide?.reset();
       if(Object.keys(patch).every(key=>['overlayEnabled','overlayShortcut','overlaySide'].includes(key))){emitSnapshot();return settings;}
     }
     if (patch.downloadLimitMiB !== undefined) {
@@ -2110,14 +2111,13 @@ app.whenReady().then(async () => {
   void checkLauncherUpdate().then(() => emitSnapshot());
   registerIpc();
 
-  const guideInitial=()=>({auth:guideAuth(),profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),runtimeInvites:combinedInviteState(gameInviteBridges.values())});
-  gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),
-   helper:app.isPackaged?path.join(process.resourcesPath,'overlay','xbox_guide.py'):path.join(__dirname,'..','..','assets','overlay','xbox_guide.py'),
-   account:()=>nativeSocialConnection()?.account,initial:guideInitial,
+  const guideInitial=()=>({auth:guideAuth(),profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),language:store.settings.interfaceLanguage,runtimeInvites:combinedInviteState(gameInviteBridges.values())});
+  const guideHelper=app.isPackaged?path.join(process.resourcesPath,'overlay','xbox_guide.py'):path.join(__dirname,'..','..','assets','overlay','xbox_guide.py');
+  gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),helper:guideHelper,
+   account:()=>{const context=nativeSocialConnection();return context?JSON.stringify(context):undefined;},initial:guideInitial,
    enabled:()=>xboxOverlaySettings(store.settings).overlayEnabled,
-   legacyShortcutOwned:()=>gameGuide.bound&&overlayShortcut?.current.state==='registered'&&xboxOverlaySettings(store.settings).overlayShortcut==='Super+G',
    monitor:()=>screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds,
-   problem:message=>{if(Notification.isSupported())new Notification({title:'Nexus Guide',body:message}).show();},
+   problem:message=>{if(Notification.isSupported())new Notification({title:nativeText('Nexus Guide'),body:nativeText(message)}).show();},
    invoke:async(method,args)=>{
     const text=(index:number)=>{const value=args[index];if(typeof value!=='string')throw Error('Invalid Guide request.');return value;};
     switch(method){
@@ -2141,14 +2141,16 @@ app.whenReady().then(async () => {
    },
   });
   nativeSocialResets.push(()=>gameGuide.reset());
-  nativeSocialSnapshots.push(()=>{gameGuide.publish('auth',guideAuth());gameGuide.publish('runtimeInvites',combinedInviteState(gameInviteBridges.values()));});
+  nativeSocialSnapshots.push(()=>{gameGuide.publish('auth',guideAuth());gameGuide.publish('language',store.settings.interfaceLanguage);gameGuide.publish('runtimeInvites',combinedInviteState(gameInviteBridges.values()));});
   nativeSocialShutdown.push(async()=>{await overlayShortcut?.shutdown();await gameGuide.shutdown();});
   if(!demoMode){
-   if(app.isPackaged&&process.env.APPIMAGE)await ensureOverlayDesktopEntry(process.env.APPIMAGE).catch(()=>console.error('Nexus desktop shortcut identity unavailable.'));
-   overlayShortcut=new XboxOverlayShortcut(globalShortcut,()=>gameGuide.toggle(),emitSnapshot,{profileDirectory:app.getPath('userData')});
+   overlayShortcut=new XboxOverlayShortcut(globalShortcut,()=>gameGuide.toggle(),emitSnapshot,{prepare:async()=>{
+    await checkGuideHost(guideHelper);
+    if(app.isPackaged&&process.env.APPIMAGE)await ensureOverlayDesktopEntry(process.env.APPIMAGE);
+   }});
    await overlayShortcut.configure(store.settings);
   }
-  try{await gameGuide.startControl(path.join(process.env.XDG_RUNTIME_DIR??`/run/user/${process.getuid?.()}`,'xodus-nexus-guide.sock'));}catch{console.error('Nexus Guide shortcut control unavailable.');}
+  // No external toggle socket or compositor scripts are installed automatically.
   launchReady = true;
   if (startupRequest.gameId) {
     await prepareSystemWallet();

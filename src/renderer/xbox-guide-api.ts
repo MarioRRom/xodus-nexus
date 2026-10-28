@@ -1,7 +1,7 @@
 import type {AuthStatus,XboxSocialApi} from '../shared/types';
 
 declare global {interface Window {readonly nexusOverlaySession?:string}}
-type Event='auth'|'party'|'voice'|'invites'|'profile'|'overlay'|'runtimeInvites';
+type Event='auth'|'party'|'voice'|'invites'|'profile'|'overlay'|'runtimeInvites'|'visibility'|'language';
 const listeners=new Map<Event,Set<(value:any)=>void>>();
 const cached=new Map<Event,unknown>();
 const token=window.nexusOverlaySession;
@@ -33,7 +33,7 @@ export function connectGuideEvents(problem:(error:string|undefined)=>void):()=>v
           let boundary:number;
           while((boundary=pending.indexOf('\n\n'))>=0){
             const frame=pending.slice(0,boundary);pending=pending.slice(boundary+2);
-            const event=/^event: (auth|party|voice|invites|profile|overlay|runtimeInvites)$/m.exec(frame)?.[1] as Event|undefined;
+            const event=/^event: (auth|party|voice|invites|profile|overlay|runtimeInvites|visibility|language)$/m.exec(frame)?.[1] as Event|undefined;
             const data=/^data: (.+)$/m.exec(frame)?.[1];if(!event||!data)continue;
             const value=JSON.parse(data);cached.set(event,value);for(const listener of listeners.get(event)??[])listener(value??undefined);
           }
@@ -41,7 +41,11 @@ export function connectGuideEvents(problem:(error:string|undefined)=>void):()=>v
       }catch(error){
         if(controller.signal.aborted)return;
         problem(error instanceof Error?error.message:'Nexus Guide disconnected.');
-        await new Promise<void>(resolve=>{const timer=setTimeout(resolve,1500);controller.signal.addEventListener('abort',()=>{clearTimeout(timer);resolve();},{once:true});});
+        await new Promise<void>(resolve=>{
+          const done=()=>{clearTimeout(timer);controller.signal.removeEventListener('abort',done);resolve();};
+          const timer=setTimeout(done,1500);controller.signal.addEventListener('abort',done,{once:true});
+          if(controller.signal.aborted)done();
+        });
       }
     }
   })();

@@ -30,7 +30,7 @@ it('requires the private session token, exact host, and same-origin requests',as
   expect(f.invoke).not.toHaveBeenCalled();expect((await f.rpc('getXboxFriends')).status).toBe(200);
 });
 it('exposes only social controls, with no raw media credentials, launcher operations, or arbitrary proxies',async()=>{
-  const f=await fixture();for(const method of ['startXboxParty','allowXboxMicrophone','getSnapshot','run','fetch','updateBackend','openXboxPlayerProfile','popOutXboxChat'])expect((await f.rpc(method)).status).toBe(400);
+  const f=await fixture();for(const method of ['startXboxParty','controlXboxVoice','getXboxParty','allowXboxMicrophone','getSnapshot','run','fetch','updateBackend','openXboxPlayerProfile','popOutXboxChat'])expect((await f.rpc(method)).status).toBe(400);
   expect((await f.rpc('sendXboxMessage',['current','2','Explicit fixture message'])).status).toBe(200);
   expect(f.invoke).toHaveBeenCalledOnce();expect(f.invoke).toHaveBeenCalledWith('sendXboxMessage',['current','2','Explicit fixture message']);
 });

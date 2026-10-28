@@ -7,12 +7,11 @@ const methods=new Set([
   'getXboxPlayerDetails','getXboxPlayerGames','getXboxPeople','getXboxRelationship','changeXboxRelationship',
   'getXboxPlayerProfile','getXboxProfileRequest','completeXboxProfileRequest','getXboxFriends',
   'getXboxInbox','getXboxConversation','sendXboxMessage','getXboxGameInviteAvailability','sendXboxGameInvite',
-  'getXboxParty','getXboxActiveParties','leaveExistingXboxParty','inviteXboxPartyFriend','getXboxInvites',
   'chooseGameInviteRecipient','cancelGameInvite','acceptGameInvite',
-  'acceptXboxGameInvite','cancelXboxGameInvite','getXboxVoiceState','controlXboxVoice','closeXboxGuide',
+  'closeXboxGuide',
 ]);
 const media:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.woff':'font/woff','.woff2':'font/woff2','.svg':'image/svg+xml','.png':'image/png'};
-export type GuideEvent='auth'|'party'|'voice'|'invites'|'profile'|'overlay'|'runtimeInvites';
+export type GuideEvent='auth'|'party'|'voice'|'invites'|'profile'|'overlay'|'runtimeInvites'|'visibility'|'language';
 export type GuideInitial=Partial<Record<GuideEvent,unknown>>&{auth:unknown;profile:unknown};
 type Options={directory:string;account:()=>string|undefined;initial:()=>GuideInitial;invoke:(method:string,args:unknown[])=>Promise<unknown>};
 const fail=(response:ServerResponse,status:number,message:string)=>{response.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});response.end(JSON.stringify({error:message}));};
@@ -76,12 +75,15 @@ export class XboxGuideServer {
     await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>{server.removeListener('error',reject);resolve();});});
     const address=server.address();if(!address||typeof address==='string')throw Error('Nexus Guide address unavailable.');
     this.origin=`http://127.0.0.1:${address.port}`;
-    this.timer=setInterval(()=>{if(this.options.account()!==this.bound){void this.stop();return;}for(const client of this.clients)client.write(': keepalive\n\n');},20_000);this.timer.unref();
+    this.timer=setInterval(()=>{if(this.options.account()!==this.bound){void this.stop();return;}for(const client of this.clients)this.write(client,': keepalive\n\n');},20_000);this.timer.unref();
     return `${this.origin}/overlay.html`;
   }
+  private write(client:ServerResponse,frame:string):void{
+    if(client.destroyed||client.writableLength+Buffer.byteLength(frame)>1_000_000){client.destroy();this.clients.delete(client);return;}
+    client.write(frame);
+  }
   private event(client:ServerResponse,event:string,value:unknown):void{
-    if(client.writableLength>1_000_000){client.destroy();this.clients.delete(client);return;}
-    client.write(`event: ${event}\ndata: ${JSON.stringify(value??null)}\n\n`);
+    this.write(client,`event: ${event}\ndata: ${JSON.stringify(value??null)}\n\n`);
   }
   publish(event:GuideEvent,value:unknown):void{
     if(!this.bound||this.options.account()!==this.bound)return;
@@ -91,6 +93,6 @@ export class XboxGuideServer {
     clearInterval(this.timer);this.bound=undefined;
     for(const client of this.clients)client.end();this.clients.clear();
     const server=this.server;this.server=undefined;
-    if(server){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+    if(server)await new Promise<void>(resolve=>{server.close(()=>resolve());server.closeAllConnections();});
   }
 }

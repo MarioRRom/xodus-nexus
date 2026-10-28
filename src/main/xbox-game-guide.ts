@@ -1,13 +1,17 @@
-import {spawn,type ChildProcessWithoutNullStreams} from 'node:child_process';
-import {createServer,createConnection,type Server,type Socket} from 'node:net';
-import {promises as fs} from 'node:fs';
-import path from 'node:path';
+import {spawn,execFile,type ChildProcessWithoutNullStreams} from 'node:child_process';
+import {promisify} from 'node:util';
 import type {XboxProfileRequest} from '../shared/types.js';
 import {externalLauncherEnvironment} from './launcher-environment.js';
 import {XboxGuideServer,type GuideEvent,type GuideInitial} from './xbox-guide-server.js';
 
 export type GuideMonitor={x:number;y:number;width:number;height:number};
-type Options={directory:string;helper:string;account:()=>string|undefined;initial:()=>GuideInitial;invoke:(method:string,args:unknown[])=>Promise<unknown>;problem:(message:string)=>void;monitor:()=>GuideMonitor;enabled:()=>boolean;legacyShortcutOwned?:()=>boolean};
+type Options={directory:string;helper:string;account:()=>string|undefined;initial:()=>GuideInitial;invoke:(method:string,args:unknown[])=>Promise<unknown>;problem:(message:string)=>void;monitor:()=>GuideMonitor;enabled:()=>boolean};
+export async function checkGuideHost(helper:string):Promise<void>{
+ try{
+  const {stdout}=await promisify(execFile)('/usr/bin/python3',['-B',helper,'--check'],{env:externalLauncherEnvironment(process.env),timeout:3000,maxBuffer:8192});
+  if(JSON.parse(stdout).ready!==true)throw Error('unavailable');
+ }catch{throw Error('Nexus Guide requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Install these dependencies and try again.');}
+}
 export function gameGuideMonitor(value:GuideMonitor):GuideMonitor{
  if(!value||!['x','y','width','height'].every(key=>Number.isSafeInteger(value[key as keyof GuideMonitor]))||Math.abs(value.x)>131072||Math.abs(value.y)>131072||value.width<=0||value.height<=0||value.width>32768||value.height>32768)throw Error('Nexus Guide monitor unavailable.');
  return {x:value.x,y:value.y,width:value.width,height:value.height};
@@ -23,13 +27,12 @@ export class XboxGameGuide {
   private visible=false;
   private wanted=false;
   private generation=0;
+  private session?:string;
   private checking?:Promise<void>;
   private profile?:XboxProfileRequest;
   private profileClosed?:()=>void;
   private watch?:ReturnType<typeof setInterval>;
-  private control?:Server;
-  private readonly controlClients=new Set<Socket>();
-  private controlPath?:string;
+  private readonly closing=new Set<Promise<void>>();
   constructor(private readonly options:Options){}
   get profileRequest():XboxProfileRequest|undefined{return this.profile?{...this.profile}:undefined;}
   get shown():boolean{return this.visible||this.wanted;}
@@ -46,16 +49,34 @@ export class XboxGameGuide {
     this.reset();
   }
   reset():void{
-    this.generation++;this.opening=undefined;this.hide(false);this.child?.stdin.end('quit\n');this.child=undefined;
-    const server=this.http;this.http=undefined;void server?.stop();
+    this.generation++;this.opening=undefined;this.hide(false);this.session=undefined;this.view=undefined;
+    const child=this.child;this.child=undefined;
+    if(child){
+      // A stuck GTK/WebKit helper must not survive its account or game session.
+      const close=new Promise<void>(resolve=>{
+        let term:ReturnType<typeof setTimeout>,kill:ReturnType<typeof setTimeout>;
+        const done=()=>{clearTimeout(term);clearTimeout(kill);resolve();};
+        child.once('exit',done);child.once('error',done);
+        term=setTimeout(()=>{child.kill('SIGTERM');},500);term.unref();
+        kill=setTimeout(()=>{child.kill('SIGKILL');},1500);kill.unref();
+        child.stdin.end('quit\n');
+        if(child.exitCode!==null||child.signalCode!==null)done();
+      });
+      this.closing.add(close);void close.finally(()=>this.closing.delete(close));
+    }
+    const server=this.http;this.http=undefined;
+    if(server){const close=server.stop();this.closing.add(close);void close.finally(()=>this.closing.delete(close));}
   }
   private async refresh():Promise<void>{
     if(this.checking)return this.checking;if(!this.game)return;
     const bound=this.game;
     const checking=(async()=>{try{
-      const next={monitor:gameGuideMonitor(this.options.monitor())};
+      const account=this.options.account();
+      if(!this.options.enabled()||!account){if(this.http)this.reset();this.view=undefined;return;}
+      if(this.http&&this.session!==account)this.reset();
+      // Pin the chosen display while the view lives, not the moving cursor.
+      const next=this.http&&this.view?this.view:{monitor:gameGuideMonitor(this.options.monitor())};
       if(this.game!==bound)return;
-      if(this.http&&this.view&&JSON.stringify(next.monitor)!==JSON.stringify(this.view.monitor))this.reset();
       this.view=next;
     }catch{if(this.shown)this.hide(false);this.view=undefined;}
     })();this.checking=checking;
@@ -81,13 +102,15 @@ export class XboxGameGuide {
   }
   private async show():Promise<void>{
     if(!this.view)await this.refresh();
+    if(!this.options.enabled())throw Error('Enable the Nexus Guide in Nexus Settings.');
     this.wanted=true;
     if(this.opening){await this.opening;if(this.wanted)this.child?.stdin.write('show\n');return;}
     if(this.child){this.child.stdin.write('show\n');return;}
     if(!this.game||!this.view||!this.options.account()){this.wanted=false;throw Error('Nexus Guide game session unavailable.');}
-    const generation=this.generation,view=this.view;
+    const generation=this.generation,view=this.view,account=this.options.account();this.session=account;
     const opening=(async()=>{
-      const server=new XboxGuideServer({...this.options,initial:()=>({...this.options.initial(),profile:this.profileRequest}),invoke:async(method,args)=>{
+      const session=()=>generation===this.generation&&this.game&&this.options.enabled()?this.options.account():undefined;
+      const server=new XboxGuideServer({...this.options,account:session,initial:()=>({...this.options.initial(),profile:this.profileRequest,visibility:this.visible}),invoke:async(method,args)=>{
         if(method==='closeXboxGuide'){this.hide();return;}
         if(method==='getXboxProfileRequest')return this.profileRequest;
         if(method==='completeXboxProfileRequest'){
@@ -97,7 +120,7 @@ export class XboxGameGuide {
         return this.options.invoke(method,args);
       }});this.http=server;
       const url=await server.start();
-      if(generation!==this.generation){await server.stop();return;}
+      if(generation!==this.generation||this.options.account()!==account||!this.options.enabled()){await server.stop();return;}
       const child=spawn('/usr/bin/python3',[this.options.helper],{env:externalLauncherEnvironment(process.env),stdio:['pipe','pipe','pipe']});this.child=child;
       child.stdin.on('error',()=>{});child.stderr.resume();
       await new Promise<void>((resolve,reject)=>{
@@ -110,8 +133,8 @@ export class XboxGameGuide {
           pending=(pending+bytes.toString()).slice(-8192);const lines=pending.split('\n');pending=lines.pop()??'';
           for(const line of lines){try{const value=JSON.parse(line);
             if(value.event==='ready'){ready=true;clearTimeout(timer);resolve();}
-            if(value.event==='shown'){this.visible=true;if(!this.wanted)child.stdin.write('hide\n');}
-            if(value.event==='hidden'){this.visible=false;this.wanted=false;if(this.profile)this.completeProfile(this.profile.id,false);}
+            if(value.event==='shown'){this.visible=this.wanted;this.publish('visibility',this.visible);if(!this.wanted)child.stdin.write('hide\n');}
+            if(value.event==='hidden'){this.visible=false;this.wanted=false;this.publish('visibility',false);if(this.profile)this.completeProfile(this.profile.id,false);}
             if(value.event==='error'){reject(Error('Nexus Guide host unavailable.'));this.reset();}
           }catch{}}
         });
@@ -123,34 +146,14 @@ export class XboxGameGuide {
     finally{if(this.opening===opening)this.opening=undefined;}
   }
   hide(restore=true):void{
-    const was=this.shown;this.wanted=false;this.visible=false;this.child?.stdin.write('hide\n');
+    const was=this.shown;this.wanted=false;this.visible=false;this.publish('visibility',false);this.child?.stdin.write('hide\n');
     if(this.profile)this.completeProfile(this.profile.id,false);
     // Unmapping returns focus naturally; never raise the game from a desktop shortcut.
     if(restore&&was)void this.refresh();
   }
   publish(event:GuideEvent,value:unknown):void{this.http?.publish(event,value);}
-  async startControl(socketPath:string):Promise<void>{
-    const stat=await fs.lstat(socketPath).catch(()=>undefined);
-    if(stat){
-      if(!stat.isSocket()||stat.uid!==process.getuid?.())throw Error('Nexus Guide control socket unavailable.');
-      const listening=await new Promise<boolean>(resolve=>{const client=createConnection(socketPath);client.once('connect',()=>{client.destroy();resolve(true);});client.once('error',()=>resolve(false));client.setTimeout(500,()=>{client.destroy();resolve(true);});});
-      if(listening)throw Error('Another Nexus owns Nexus Guide.');await fs.unlink(socketPath);
-    }
-    const server=createServer(socket=>{this.controlClients.add(socket);socket.once('close',()=>this.controlClients.delete(socket));let input='';socket.setTimeout(3000,()=>socket.destroy());socket.on('error',()=>{});socket.on('data',bytes=>{
-      input+=bytes.toString();if(input.length>128){socket.destroy();return;}if(!input.includes('\n'))return;
-      socket.pause();let request:unknown;try{request=JSON.parse(input.trim());}catch{socket.end('{"handled":false}\n');return;}
-      if(JSON.stringify(request)!=='{"command":"toggle"}'){socket.end('{"handled":false}\n');return;}
-      // Old desktop scripts must not toggle a second time beside the app-owned shortcut.
-      if(this.options.legacyShortcutOwned){socket.end(JSON.stringify({handled:this.options.legacyShortcutOwned()})+'\n');return;}
-      void this.toggle().then(handled=>socket.end(JSON.stringify({handled})+'\n'),()=>socket.end('{"handled":true,"error":"Guide unavailable"}\n'));
-    });});
-    await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(socketPath,()=>{server.removeListener('error',reject);resolve();});});
-    await fs.chmod(socketPath,0o600);this.control=server;this.controlPath=socketPath;
-  }
   async shutdown():Promise<void>{
-    this.unbind();const server=this.control;this.control=undefined;
-    for(const client of this.controlClients)client.destroy();this.controlClients.clear();
-    if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));
-    if(this.controlPath)await fs.unlink(this.controlPath).catch(()=>{});this.controlPath=undefined;
+    this.unbind();
+    await Promise.allSettled([...this.closing]);
   }
 }

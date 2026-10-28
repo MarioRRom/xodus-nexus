@@ -454,6 +454,18 @@ Object.defineProperty(window,'nexusOverlaySession',{value:TOKEN,writable:false,c
 
 def main():
     try:
+        if sys.argv[1:] == ["--check"]:
+            try:
+                import gi
+                gi.require_version("Gtk", "3.0")
+                gi.require_version("WebKit2", "4.1")
+                from gi.repository import Gtk, WebKit2
+            except (ImportError, ValueError):
+                raise GuideError("dependencies-unavailable") from None
+            print(json.dumps({"ready": True}), flush=True)
+            return 0
+        if sys.argv[1:]:
+            raise GuideError("invalid-config")
         # Avoid buffered read-ahead swallowing commands sent with the config.
         line = b""
         while len(line) <= 8192:

@@ -7,7 +7,7 @@ import {XboxChat} from './XboxChat';
 export function overlayChatPosition(x:number,y:number,width:number,height:number,viewport:{width:number;height:number}){
  return {x:Math.max(8,Math.min(x,Math.max(8,viewport.width-width-8))),y:Math.max(8,Math.min(y,Math.max(8,viewport.height-height-8)))};
 }
-export function XboxOverlayChat({api,account,xuid,index,close,raise,openProfile,side='left'}:{api:XboxSocialApi;account:string;xuid:string;index:number;side?:'left'|'right';close:()=>void;raise:()=>void;openProfile:(xuid:string)=>void}){
+export function XboxOverlayChat({api,account,xuid,index,close,raise,openProfile,side='left',active=true}:{api:XboxSocialApi;account:string;xuid:string;index:number;side?:'left'|'right';active?:boolean;close:()=>void;raise:()=>void;openProfile:(xuid:string)=>void}){
  const root=useRef<HTMLElement>(null),drag=useRef<{id:number;x:number;y:number;left:number;top:number}>();
  const [position,setPosition]=useState(()=>overlayChatPosition(side==='right'?window.innerWidth-890-index*28:470+index*28,72+index*28,420,620,{width:window.innerWidth,height:window.innerHeight}));
  useEffect(()=>{root.current?.querySelector('textarea')?.focus();},[]);
@@ -22,6 +22,6 @@ export function XboxOverlayChat({api,account,xuid,index,close,raise,openProfile,
    onPointerUp={()=>{drag.current=undefined;}} onPointerCancel={()=>{drag.current=undefined;}}>
    <span>{ui("social.xbox_chat_ed1ef2")}</span><button className="social-circle-button social-close" aria-label={ui("social.close_chat_window_bed35c")} onClick={close}><X/></button>
   </header>
-  <XboxChat api={api} account={account} xuid={xuid} openProfile={openProfile}/>
+  <XboxChat api={api} account={account} xuid={xuid} active={active} openProfile={openProfile}/>
  </section>;
 }

@@ -1,5 +1,5 @@
 import type {Settings} from './types.js';
-export const defaultXboxOverlay={overlayEnabled:true,overlayShortcut:'Super+G',overlaySide:'left' as const};
+export const defaultXboxOverlay={overlayEnabled:false,overlayShortcut:'Super+G',overlaySide:'left' as const};
 export function xboxOverlayShortcut(value:unknown):string{
  if(typeof value!=='string'||value.length>80||/[\x00-\x1f\x7f]/.test(value))throw Error('Enter an overlay shortcut, such as Super+G or Shift+Tab.');
  const parts=value.split('+').map(part=>part.trim()),key=parts.pop()??'';
@@ -12,7 +12,7 @@ export function xboxOverlayShortcut(value:unknown):string{
 export function xboxOverlaySettings(settings:Pick<Settings,'overlayEnabled'|'overlayShortcut'|'overlaySide'>){
  let overlayShortcut=defaultXboxOverlay.overlayShortcut;
  try{overlayShortcut=xboxOverlayShortcut(settings.overlayShortcut??overlayShortcut);}catch{}
- return {overlayEnabled:typeof settings.overlayEnabled==='boolean'?settings.overlayEnabled:true,overlayShortcut,overlaySide:settings.overlaySide==='right'?'right' as const:'left' as const};
+ return {overlayEnabled:typeof settings.overlayEnabled==='boolean'?settings.overlayEnabled:defaultXboxOverlay.overlayEnabled,overlayShortcut,overlaySide:settings.overlaySide==='right'?'right' as const:'left' as const};
 }
 export function xboxOverlayPatch(patch:Partial<Settings>):Partial<Settings>{
  const result:Partial<Settings>={};

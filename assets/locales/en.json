@@ -972,7 +972,7 @@
   "settings.guide_on": "On",
   "settings.guide_off": "Off",
   "settings.guide_enable": "Enable in-game Guide",
-  "settings.guide_enable_help": "Open friends, chats and party controls while playing.",
+  "settings.guide_enable_help": "Open friends and chats while playing. Requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Desktop shortcut permissions may be needed; fullscreen support depends on your desktop.",
   "settings.guide_controls": "Guide controls",
   "settings.guide_shortcut": "Keyboard shortcut",
   "settings.guide_side": "Shelf position",
@@ -980,5 +980,12 @@
   "settings.guide_right": "Right",
   "settings.guide_side_help": "Choose which edge the in-game Guide opens from.",
   "settings.guide_saved": "Guide settings saved.",
-  "settings.guide_save": "Save Guide settings"
+  "settings.guide_save": "Save Guide settings",
+  "settings.guide_dependencies": "Nexus Guide requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Install these dependencies and try again.",
+  "settings.guide_registration_failed": "This shortcut could not be registered. Choose another combination or check desktop shortcut permissions.",
+  "social.guide_open_failed": "Nexus Guide could not open. Reopen the guide and try again.",
+  "social.guide_profile_failed": "Nexus Guide could not display the player profile.",
+  "social.guide_closed_unexpectedly": "Nexus Guide closed unexpectedly. Reopen the guide and try again.",
+  "social.guide_session_ended": "Nexus Guide session ended. Reopen it from the game.",
+  "social.guide_disconnected": "Nexus Guide disconnected."
 }

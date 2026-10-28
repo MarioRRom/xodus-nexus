@@ -58,7 +58,7 @@ vi.mock('./catalog.js', () => ({ CatalogService: class { async artwork() { retur
 vi.mock('./account-profile.js', () => ({ AccountProfile: class { async select() {} cancel() {} } }));
 vi.mock('./launcher-update.js', () => ({ LauncherUpdater: class { state = {}; async initialize() {} async check() {} cancel() {} } }));
 // Keep download integration fixtures isolated from the real compositor and shortcut portal.
-vi.mock('./xbox-game-guide.js',()=>({XboxGameGuide:class {reset(){} bind(){} unbind(){} publish(){} async startControl(){} async shutdown(){}}}));
+vi.mock('./xbox-game-guide.js',()=>({XboxGameGuide:class {reset(){} bind(){} unbind(){} publish(){} async shutdown(){}}}));
 vi.mock('./xbox-overlay-shortcut.js',()=>({ensureOverlayDesktopEntry:async()=>{},XboxOverlayShortcut:class {current={state:'disabled'};async configure(){}async shutdown(){}}}));
 vi.mock('./launcher-fonts.js', () => ({ adoptLauncherFonts: () => undefined, externalFontEnvironment: (env: unknown) => env }));
 // Deletion is restricted to disposable fixture directories, never real games.
