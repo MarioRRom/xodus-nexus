@@ -14,7 +14,7 @@ export function XboxVoiceHost({api}:{api:XboxVoiceApi&XboxVoiceHostApi}){
       members.clear();for(const member of party.members)members.add(member.xuid);selfXuid=party.selfXuid;
       for(const id of muted)if(!members.has(id))muted.delete(id);
       if(party.phase==='idle'||party.phase==='error'||party.phase==='leaving'){
-        voice.closeMedia();muted.clear();state={connected:false,muted:true,audioBlocked:false,...(party.error?{error:party.error}:{})};publish();
+        voice.closeMedia();muted.clear();const error=party.error??state.error;state={connected:false,muted:true,audioBlocked:false,...(error?{error}:{})};publish();
       }else publish();
     };
     const unsubscribeParty=api.onXboxPartyState(party=>{received=true;sync(party);});

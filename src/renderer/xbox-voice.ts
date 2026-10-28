@@ -1,8 +1,8 @@
 import type { XboxVoiceApi } from '../shared/types';
 
 export type VoiceState={connected:boolean;muted:boolean;audioBlocked:boolean;error?:string};
-type Peer={mid:string;allowed:boolean;muted:boolean};
-const validXuid=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,19}$/.test(v);
+type Peer={mid:string;allowed:boolean;muted:boolean;privacyVersion:number};
+const validXuid=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,19}$/.test(v)&&BigInt(v)<=18446744073709551615n;
 
 /** Local WebRTC audio; Xbox credentials and the authenticated chat socket stay in main. */
 export class XboxVoice {
@@ -18,6 +18,7 @@ export class XboxVoice {
   private timer?:ReturnType<typeof setTimeout>;
   private privacyTimer?:ReturnType<typeof setInterval>;
   private generation=0;
+  private microphoneVersion=0;
   private partyId?:string;
   private relayConnected=false;
   private confirming=false;
@@ -36,9 +37,9 @@ export class XboxVoice {
   }
   private async privacy(xuid:string):Promise<void>{
     const peer=this.peers.get(xuid);if(!peer)return;
-    const generation=this.generation;peer.allowed=false;this.applyPeer(xuid);
+    const generation=this.generation,version=++peer.privacyVersion;peer.allowed=false;this.applyPeer(xuid);
     const allowed=await this.api.xboxVoiceAllowed(xuid).catch(()=>false);
-    if(generation!==this.generation||this.peers.get(xuid)!==peer)return;
+    if(generation!==this.generation||this.peers.get(xuid)!==peer||version!==peer.privacyVersion)return;
     peer.allowed=allowed;this.applyPeer(xuid);
   }
   mutePeer(xuid:string,muted:boolean):void{if(muted)this.mutedPeers.add(xuid);else this.mutedPeers.delete(xuid);const peer=this.peers.get(xuid);if(peer){peer.muted=muted;this.applyPeer(xuid);}}
@@ -60,7 +61,7 @@ export class XboxVoice {
       const pc=new RTCPeerConnection({});this.pc=pc;
       this.context=new AudioContext();this.silence=this.context.createMediaStreamDestination().stream;
       const channel=pc.createDataChannel('control',{ordered:true,protocol:'controlV1'});this.channel=channel;
-      channel.onopen=()=>{this.send('SessionConfiguration',{messageVersion:1,useSessionDocumentForPrivacy:false});void this.complete(generation);};
+      channel.onopen=()=>{if(generation!==this.generation)return;this.send('SessionConfiguration',{messageVersion:1,useSessionDocumentForPrivacy:false});void this.complete(generation);};
       channel.onclose=()=>{if(generation===this.generation)void this.failed(generation,'Xbox party audio disconnected.');};
       channel.onmessage=event=>{
         if(generation!==this.generation||typeof event.data!=='string'||event.data.length>256*1024)return;
@@ -72,7 +73,9 @@ export class XboxVoice {
             this.relayConnected=content.state==='Connected';void this.complete(generation);
             if(!this.relayConnected&&this.state.connected)void this.failed(generation,'Xbox party relay disconnected.');
           }else if(message.type==='PeerAdded' && validXuid(content.xuid) && typeof content.transportSinkId==='string' && content.transportSinkId.length<=128){
-            this.peers.set(content.xuid,{mid:content.transportSinkId,allowed:false,muted:this.mutedPeers.has(content.xuid)});void this.privacy(content.xuid);
+            if([...this.peers.entries()].some(([id,peer])=>id!==content.xuid&&peer.mid===content.transportSinkId))throw Error('Duplicate audio transport.');
+            const previous=this.peers.get(content.xuid);if(previous){previous.allowed=false;this.applyPeer(content.xuid);}
+            this.peers.set(content.xuid,{mid:content.transportSinkId,allowed:false,muted:this.mutedPeers.has(content.xuid),privacyVersion:0});void this.privacy(content.xuid);
           }else if(message.type==='PeerRemoved' && validXuid(content.xuid)){
             const peer=this.peers.get(content.xuid);if(peer){peer.allowed=false;this.applyPeer(content.xuid);this.peers.delete(content.xuid);}
           }else if(message.type==='PrivacyChanged')for(const xuid of this.peers.keys())void this.privacy(xuid);
@@ -82,13 +85,15 @@ export class XboxVoice {
       for(let i=0;i<15;i++){const t=pc.addTransceiver('audio',{direction:'recvonly'});t.receiver.track.enabled=false;}
       const outgoing=pc.addTransceiver('audio',{direction:'sendonly'});this.sender=outgoing.sender;
       await outgoing.sender.replaceTrack(this.silence.getAudioTracks()[0]);
+      if(generation!==this.generation)return;
       const opus=RTCRtpSender.getCapabilities('audio')?.codecs.filter(c=>c.mimeType.toLowerCase().includes('opus'));
       if(opus?.length)outgoing.setCodecPreferences(opus);
       pc.ontrack=event=>{
         event.track.enabled=false;
+        if(generation!==this.generation){event.track.stop();return;}
         const audio=document.createElement('audio');audio.autoplay=true;audio.srcObject=new MediaStream([event.track]);
         this.audio.set(event.transceiver.mid??event.track.id,audio);
-        void audio.play().catch(()=>this.update({audioBlocked:true}));
+        void audio.play().catch(()=>{if(generation===this.generation)this.update({audioBlocked:true});});
         for(const xuid of this.peers.keys())this.applyPeer(xuid);
       };
       pc.onconnectionstatechange=()=>{
@@ -97,27 +102,31 @@ export class XboxVoice {
         else void this.complete(generation);
       };
       this.timer=setTimeout(()=>void this.failed(generation,'The Xbox party audio connection timed out.'),60_000);
-      await pc.setLocalDescription(await pc.createOffer());
+      const description=await pc.createOffer();if(generation!==this.generation)return;
+      await pc.setLocalDescription(description);if(generation!==this.generation)return;
       const bytes=crypto.getRandomValues(new Uint8Array(16));const cv=btoa(String.fromCharCode(...bytes)).replace(/=/g,'')+'.0';
       const offer=JSON.stringify({messageType:'transportConnectionRequestMessage',sdp:pc.localDescription!.sdp,cv,configuration:{control:{minVersion:1,maxVersion:1}}});
       const result=await (inviteId?this.api.acceptXboxPartyInvite(offer,inviteId):this.api.startXboxParty(offer,partyId));if(generation!==this.generation)return;
       this.partyId=result.id;
       await pc.setRemoteDescription({type:result.answer.sdpType,sdp:result.answer.sdp});
-      for(const candidate of result.answer.iceCandidates)await pc.addIceCandidate({...candidate,candidate:candidate.candidate==='a=end-of-candidates'?'':candidate.candidate});
+      if(generation!==this.generation)return;
+      for(const candidate of result.answer.iceCandidates){await pc.addIceCandidate({...candidate,candidate:candidate.candidate==='a=end-of-candidates'?'':candidate.candidate});if(generation!==this.generation)return;}
       this.privacyTimer=setInterval(()=>{for(const xuid of this.peers.keys())void this.privacy(xuid);},60_000);
       void this.complete(generation);
-    }catch(error){await this.failed(generation,error instanceof Error?error.message:'Xbox party audio could not connect.');}
+    }catch(error){await this.failed(generation,error instanceof Error?error.message:'Xbox party audio could not connect.');throw error;}
   }
   async setMuted(muted:boolean):Promise<void>{
+    const version=++this.microphoneVersion;
     if(muted){this.microphone?.getTracks().forEach(t=>t.stop());this.microphone=undefined;
-      await this.sender?.replaceTrack(this.silence?.getAudioTracks()[0]??null);this.update({muted:true});return;}
+      await this.sender?.replaceTrack(this.silence?.getAudioTracks()[0]??null);if(version===this.microphoneVersion)this.update({muted:true});return;}
     if(!this.state.connected||!this.sender)throw Error('Connect a party before enabling the microphone.');
     const generation=this.generation;await this.api.allowXboxMicrophone();
+    if(generation!==this.generation||version!==this.microphoneVersion||!this.sender)throw Error('The party disconnected before microphone capture started.');
     const microphone=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true},video:false});
     try{
-      if(generation!==this.generation||!this.sender)throw Error('The party disconnected before microphone capture started.');
+      if(generation!==this.generation||version!==this.microphoneVersion||!this.sender)throw Error('The party disconnected before microphone capture started.');
       await this.sender.replaceTrack(microphone.getAudioTracks()[0]);
-      if(generation!==this.generation)throw Error('The party disconnected while enabling the microphone.');
+      if(generation!==this.generation||version!==this.microphoneVersion)throw Error('The party disconnected while enabling the microphone.');
       this.microphone?.getTracks().forEach(t=>t.stop());this.microphone=microphone;this.update({muted:false});
     }catch(error){microphone.getTracks().forEach(t=>t.stop());throw error;}
   }
@@ -130,7 +139,7 @@ export class XboxVoice {
   }
   closeMedia():void{
     this.state={...this.state,connected:false,muted:true};
-    this.generation++;clearTimeout(this.timer);clearInterval(this.privacyTimer);
+    this.generation++;this.microphoneVersion++;clearTimeout(this.timer);clearInterval(this.privacyTimer);
     this.microphone?.getTracks().forEach(t=>t.stop());this.microphone=undefined;
     this.silence?.getTracks().forEach(t=>t.stop());this.silence=undefined;
     for(const audio of this.audio.values()){audio.pause();audio.srcObject=null;}this.audio.clear();this.peers.clear();this.mutedPeers.clear();

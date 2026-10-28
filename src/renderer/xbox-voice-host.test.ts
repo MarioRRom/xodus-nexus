@@ -29,3 +29,8 @@ it('closes tracks on backend departure and on owner teardown without asking a gu
  const f=fixture();await Promise.resolve();f.party({phase:'leaving',members:[]});expect(f.voice.closeMedia).toHaveBeenCalledOnce();expect(f.api.publishXboxVoiceHostState).toHaveBeenLastCalledWith({connected:false,muted:true,audioBlocked:false,mutedMembers:[]});
  f.close();expect(f.offCommand).toHaveBeenCalledOnce();expect(f.offParty).toHaveBeenCalledOnce();expect(f.voice.closeMedia).toHaveBeenCalledTimes(2);expect(f.voice.leave).not.toHaveBeenCalled();
 });
+it('does not erase a media connection error when server cleanup returns an idle party',async()=>{
+ const f=fixture();await Promise.resolve();f.voice.changed({connected:false,muted:true,audioBlocked:false,error:'Connection failed.'});
+ f.party({phase:'leaving',members:[]});f.party({phase:'idle',members:[]});
+ expect(f.api.publishXboxVoiceHostState).toHaveBeenLastCalledWith(expect.objectContaining({error:'Connection failed.',connected:false,muted:true}));f.close();
+});

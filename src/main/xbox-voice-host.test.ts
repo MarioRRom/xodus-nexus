@@ -106,3 +106,18 @@ it('rejects an old control waiting for cleanup when an account reset changes the
  const stale=expect(f.host.control({type:'setMuted',muted:false})).rejects.toThrow('session changed');
  const reset=f.host.reset();finish();await reset;await stale;expect(h.windows).toHaveLength(1);expect(f.host.contents).toBeUndefined();
 });
+it('rejects remote or credential-bearing media renderers before creating an owner',async()=>{
+ const f=fixture();
+ for(const url of ['https://example.test','file:///tmp/other.html','http://user:password@localhost:5173']){
+  process.env.VITE_DEV_SERVER_URL=url;await expect(f.host.control({type:'start'})).rejects.toThrow('could not start');
+ }
+ expect(h.windows).toHaveLength(0);expect(f.leave).not.toHaveBeenCalled();
+});
+it('uses a query-free local media route and blocks navigation, redirects and popups',async()=>{
+ process.env.VITE_DEV_SERVER_URL='http://localhost:5173/?unused=private';const f=fixture();
+ const pending=expect(f.host.control({type:'start'})).rejects.toThrow();const w=await loaded();
+ expect(w.loadURL).toHaveBeenCalledWith('http://localhost:5173/#xbox-media');
+ for(const name of ['will-navigate','will-redirect']){const preventDefault=vi.fn();w.webHandlers.get(name)({preventDefault});expect(preventDefault).toHaveBeenCalledOnce();}
+ expect(w.webContents.setWindowOpenHandler.mock.calls[0][0]({url:'https://example.test'})).toEqual({action:'deny'});
+ await f.host.reset();await pending;
+});

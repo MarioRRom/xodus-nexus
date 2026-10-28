@@ -117,7 +117,7 @@ export function XboxSocial({auth,api,voice,overlay=false,shelf=false,close,openO
        <XboxAvatar src={person?.avatarUrl??item.avatarUrl} name={name}/><span><strong><XboxGamertag name={name}/></strong><small>{item.lastMessage?.hidden?ui('ui.message_hidden_or_unsupported_d199cb4'):item.lastMessage?.text||ui('social.no_message_preview')}</small></span>{unread?<span className="unread-dot" aria-label={ui("social.unread_1b9f38")}/>:null}
       </button>;})}</div>{!busy&&!problem&&!inbox.length?<p className="social-empty">{ui("social.no_conversations_in_your_primary_inbox_7a7411")}</p>:null}
     </div>:null}
-    {voice?<XboxPartyPanel api={voice} friends={friends} invitee={partyRecipient} hidden={tab!=='party'||Boolean(selected)||Boolean(profile)||choosingChat}/>:null}
+    {voice?<XboxPartyPanel api={voice} friends={friends} invitee={partyRecipient} hidden={!active||tab!=='party'||Boolean(selected)||Boolean(profile)||choosingChat}/>:null}
     {problem?<p className="social-error" role="alert">{problem}</p>:null}
     {busy&&!profile&&!selected&&tab!=='friends'&&!choosingChat?<div className="social-loading" role="status"><LoaderCircle className="spin"/><span>{ui("ui.loading_ba3bbbe")}</span></div>:null}
    </div>

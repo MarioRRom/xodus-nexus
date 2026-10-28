@@ -26,3 +26,17 @@ it('keeps socket credentials out of connection-failure messages',async()=>{
   const job=client.connect();await Promise.resolve();await Promise.resolve();socket.dispatchEvent(new Event('error'));
   await expect(job).rejects.toThrow('disconnected before its handshake');client.close();
 });
+it('rejects a backend change during authentication before opening a socket',async()=>{
+ let connection={binary:'first',account:'account'},release!:(value:string)=>void;const create=vi.fn();
+ const client=new XboxChatSocket(()=>connection,()=>new Promise<string>(resolve=>{release=resolve;}),create);
+ const pending=client.connect(),rejected=expect(pending).rejects.toThrow('account changed');connection={binary:'second',account:'account'};release(credentials());await rejected;
+ expect(create).not.toHaveBeenCalled();client.close();
+});
+it('discards old pending authentication when a new backend connects',async()=>{
+ let connection={binary:'first',account:'account'},release!:(value:string)=>void;const socket=new FakeSocket(),create=vi.fn(()=>socket as unknown as WebSocket);
+ const read=vi.fn().mockImplementationOnce(()=>new Promise<string>(resolve=>{release=resolve;})).mockResolvedValueOnce(credentials());
+ const client=new XboxChatSocket(()=>connection,read,create);const old=client.connect(),rejected=expect(old).rejects.toThrow();
+ connection={binary:'second',account:'account'};const next=client.connect();release(credentials());await rejected;
+ await vi.waitFor(()=>expect(create).toHaveBeenCalledOnce());socket.message({channel:{type:'System'},messageType:'WhoAmI',connectionId:'new',serverNonce:'nonce'});
+ expect(await next).toMatchObject({connectionId:'new'});client.close();
+});

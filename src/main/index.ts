@@ -116,9 +116,15 @@ const nativeSocialShutdown:(()=>Promise<void>)[]=[];
 const nativeSocialSnapshots:(()=>void)[]=[];
 function nativeSocialConnection(){
  const status=backend?.current;
- return !demoMode&&!authState.running&&authState.stored===true&&authState.username&&status?.binaryPath&&status.capabilities.nativeSocial?{account:authState.username,binary:status.binaryPath}:undefined;
+ return !demoMode&&!authState.running&&authState.stored===true&&authState.username&&status?.available&&status.binaryPath&&status.capabilities.nativeSocial?{account:authState.username,binary:status.binaryPath}:undefined;
 }
 function resetNativeSocial(){for(const reset of nativeSocialResets)reset();xboxNativeSocial?.clear();resetSocialTransport();}
+let nativeSocialBackend:string|undefined;
+function syncNativeSocialBackend():void{
+ const status=backend?.current,next=status?.available&&status.capabilities.nativeSocial?status.binaryPath:undefined;
+ if(nativeSocialBackend&&nativeSocialBackend!==next)resetNativeSocial();
+ nativeSocialBackend=next;
+}
 
 async function showFriends(): Promise<void> {
   await showLauncher();
@@ -326,6 +332,7 @@ async function refreshIncompleteUpdate(game: Game): Promise<boolean> {
 }
 
 function emitSnapshot(): void {
+  syncNativeSocialBackend();
   if (snapshotTimer) clearTimeout(snapshotTimer);
   snapshotTimer = undefined;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('snapshot', snapshot());
@@ -1333,7 +1340,7 @@ function registerDemoIpc(catalogMarket: () => string): void {
   ipcMain.handle('xbox-party-invite',(event,xuid:string)=>{socialSender(event);return xboxParty.invite(xuid);});
   ipcMain.handle('xbox-party-voice-policy',(event,xuid:string)=>{voiceSender(event);return xboxParty.voiceAllowed(xuid);});
   ipcMain.handle('xbox-party-microphone',event=>{voiceSender(event);if(xboxParty.current.phase!=='connected')throw Error('Connect the Xbox party before enabling your microphone.');voiceHost.allowMicrophone();});
-  ipcMain.handle('xbox-party-accept',async(event,offer:string,id:string)=>{voiceSender(event);return xboxParty.accept(offer,await xboxInvites.partyHandle(id));});
+  ipcMain.handle('xbox-party-accept',acceptPartyInvite);
  ipcMain.handle('xbox-invites',async event=>{socialSender(event);return (await xboxInvites.list()).filter(invite=>invite.kind==='party');});
   ipcMain.handle('open-path', () => {});
 }
@@ -1341,6 +1348,12 @@ function registerDemoIpc(catalogMarket: () => string): void {
 function socialSender(event:Electron.IpcMainInvokeEvent):void{
  if(event.senderFrame!==event.sender.mainFrame||event.sender!==mainWindow?.webContents&&!nativeSocialSenders.some(owns=>owns(event)))throw Error('Social requests must come from Nexus.');
  if(!backend.current.capabilities.nativeSocial)throw Error('Update the backend to enable native Social.');
+}
+async function acceptPartyInvite(event:Electron.IpcMainInvokeEvent,offer:string,id:string){
+ if(!voiceHost.owns(event))throw Error('Party media must use the shared Nexus audio host.');
+ const context=nativeSocialConnection(),handle=await xboxInvites.partyHandle(id),current=nativeSocialConnection();
+ if(!voiceHost.owns(event)||!context||!current||context.account!==current.account||context.binary!==current.binary)throw Error('Xbox party account changed. Select the invitation again.');
+ return xboxParty.accept(offer,handle);
 }
 function registerIpc(): void {
   ipcMain.handle('open-xbox-player-profile',async(event,value:unknown)=>{
@@ -1782,7 +1795,7 @@ function registerIpc(): void {
   ipcMain.handle('xbox-party-invite',(event,xuid:string)=>{socialSender(event);return xboxParty.invite(xuid);});
   ipcMain.handle('xbox-party-voice-policy',(event,xuid:string)=>{voiceSender(event);return xboxParty.voiceAllowed(xuid);});
   ipcMain.handle('xbox-party-microphone',event=>{voiceSender(event);if(xboxParty.current.phase!=='connected')throw Error('Connect the Xbox party before enabling your microphone.');voiceHost.allowMicrophone();});
-  ipcMain.handle('xbox-party-accept',async(event,offer:string,id:string)=>{voiceSender(event);return xboxParty.accept(offer,await xboxInvites.partyHandle(id));});
+  ipcMain.handle('xbox-party-accept',acceptPartyInvite);
  ipcMain.handle('xbox-invites',async event=>{socialSender(event);return (await xboxInvites.list()).filter(invite=>invite.kind==='party');});
   ipcMain.handle('open-path', async (_event, target: string) => {
     await fs.access(target);
@@ -1894,7 +1907,7 @@ async function createWindow(): Promise<void> {
     if (windowState?.maximized || tooLarge) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => { mainWindow = null; finishShortcutSession(); });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void openDesktopTarget(url, () => shell.openExternal(url))
       .catch(() => console.warn('Could not open the external browser.'));
@@ -1988,12 +2001,12 @@ app.whenReady().then(async () => {
   xboxParty=new XboxParty(nativeSocialConnection);
   xboxInvites=new XboxInvites(nativeSocialConnection);
   voiceHost=new XboxVoiceHost(__dirname,{
-   authorizeControl:event=>event.sender===mainWindow?.webContents&&event.senderFrame===event.sender.mainFrame,
+   authorizeControl:event=>event.sender===mainWindow?.webContents&&event.senderFrame===event.sender.mainFrame&&Boolean(nativeSocialConnection()),
    stateChanged:state=>{mainWindow?.webContents.send('xbox-voice-state',state);app.emit('nexus-voice-state',state);},
    leave:()=>xboxParty.leave(),settled:finishShortcutSession,
   });
-  nativeSocialBeforeAuth.push(()=>xboxParty.leave());
-  nativeSocialResets.push(()=>{voiceHost.reset();xboxParty.suspend();xboxInvites.clear();});
+  nativeSocialBeforeAuth.push(async()=>{await voiceHost.control({type:'leave'});await xboxParty.leave();});
+  nativeSocialResets.push(()=>{void voiceHost.reset();xboxParty.suspend();xboxInvites.clear();currentXboxInvites=[];mainWindow?.webContents.send('xbox-invites',[]);});
   nativeSocialKeepAlive.push(()=>voiceHost.busy||xboxParty.active||Boolean(xboxParty.current.id));
   xboxParty.on('state',state=>{mainWindow?.webContents.send('xbox-party-state',state);voiceHost.contents?.send('xbox-party-state',state);app.emit('nexus-party-state',state);if(state.phase==='idle')finishShortcutSession();});
   xboxInvites.on('change',invites=>{currentXboxInvites=invites.filter((invite:XboxInvite)=>invite.kind==='party');mainWindow?.webContents.send('xbox-invites',currentXboxInvites);app.emit('nexus-party-invites',currentXboxInvites);});

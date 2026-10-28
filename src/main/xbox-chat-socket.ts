@@ -23,9 +23,12 @@ export class XboxChatSocket extends EventEmitter {
   }
   connect(): Promise<Identity> {
     const connection=this.connection();
+    if(this.bound&&(this.bound.account!==connection?.account||this.bound.binary!==connection?.binary))this.close();
     if(this.identity && this.bound?.account===connection?.account && this.bound?.binary===connection?.binary)return Promise.resolve(this.identity);
     if(this.identity)this.close();
     if(this.starting)return this.starting;
+    if(!connection)return Promise.reject(Error('Sign in to connect Xbox social.'));
+    this.bound={...connection};
     const generation=++this.generation;
     const controller=new AbortController();this.controller=controller;
     const job=this.open(controller.signal,generation);
@@ -38,7 +41,7 @@ export class XboxChatSocket extends EventEmitter {
     const output=await this.read(connection.binary,['chat-auth'],undefined,signal);signal.throwIfAborted();
     if(output.length>64*1024)throw Error('Invalid Xbox socket credentials.');
     const result=JSON.parse(output);
-    if(result.schema!==1 || result.kind!=='chat-auth' || result.account!==connection.account || this.connection()?.account!==connection.account
+    if(result.schema!==1 || result.kind!=='chat-auth' || result.account!==connection.account || this.connection()?.account!==connection.account || this.connection()?.binary!==connection.binary
       || !bounded(result.xuid,20) || !/^[1-9][0-9]*$/.test(result.xuid) || BigInt(result.xuid)>18446744073709551615n || !bounded(result.authKey,16*1024)) throw Error('Xbox socket account changed or authentication failed.');
     const socket=this.createSocket(`wss://chat.xboxlive.com/users/xuid(${result.xuid})/chat/connect?AuthKey=${encodeURIComponent(result.authKey)}`,'chat');
     this.socket=socket;
@@ -54,7 +57,7 @@ export class XboxChatSocket extends EventEmitter {
       socket.addEventListener('error',fail);
       socket.addEventListener('close',()=>{signal.removeEventListener('abort',aborted);fail();});
       socket.addEventListener('message',event=>{
-        if(generation!==this.generation || signal.aborted || this.connection()?.account!==connection.account){aborted();return;}
+        if(generation!==this.generation || signal.aborted || this.connection()?.account!==connection.account || this.connection()?.binary!==connection.binary){aborted();return;}
         if(typeof event.data!=='string' || event.data.length>256*1024){aborted();return;}
         try {
           const message=JSON.parse(event.data);

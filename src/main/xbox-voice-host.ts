@@ -85,6 +85,12 @@ export class XboxVoiceHost {
   }
   private ensureWindow():void{
     if(this.contents)return;
+    let development:URL|undefined;
+    if(process.env.VITE_DEV_SERVER_URL){
+      development=new URL(process.env.VITE_DEV_SERVER_URL);
+      if(development.protocol!=='http:'||!['localhost','127.0.0.1','[::1]'].includes(development.hostname)||development.username||development.password)throw Error('The Nexus party media renderer must be local.');
+      development.search='';development.hash='xbox-media';
+    }
     const window=new BrowserWindow({title:'Nexus Xbox party media',show:false,width:1,height:1,skipTaskbar:true,autoHideMenuBar:true,
       webPreferences:{preload:path.join(this.directory,'..','preload','index.cjs'),partition:'xbox-party-media',contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false,autoplayPolicy:'no-user-gesture-required'}});
     this.window=window;this.ready=false;
@@ -95,10 +101,11 @@ export class XboxVoiceHost {
     });
     window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
     window.webContents.on('will-navigate',event=>event.preventDefault());
+    window.webContents.on('will-redirect',event=>event.preventDefault());
     window.webContents.on('render-process-gone',()=>{if(this.window===window)this.fail(Error('Xbox party media stopped. Reconnect the party.'));});
     window.on('closed',()=>{if(this.window===window)this.fail(Error('Xbox party media closed. Reconnect the party.'));});
     this.readyTimer=setTimeout(()=>{if(this.window===window&&!this.ready)this.fail(Error('Xbox party media did not become ready.'));},15_000);this.readyTimer.unref();
-    const loaded=process.env.VITE_DEV_SERVER_URL?window.loadURL(`${process.env.VITE_DEV_SERVER_URL}#xbox-media`):window.loadFile(path.join(this.directory,'..','..','dist','index.html'),{hash:'xbox-media'});
+    const loaded=development?window.loadURL(development.href):window.loadFile(path.join(this.directory,'..','..','dist','index.html'),{hash:'xbox-media'});
     void loaded.catch(()=>{if(this.window===window)this.fail(Error('Xbox party media could not load.'));});
   }
   private pump():void{

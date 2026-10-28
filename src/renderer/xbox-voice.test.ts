@@ -53,3 +53,45 @@ it('opens the microphone only on explicit unmute and stops hardware capture on m
  expect(api.allowXboxMicrophone).toHaveBeenCalledOnce();expect(capture).toHaveBeenCalledWith(expect.objectContaining({video:false}));
  await voice.setMuted(true);expect(microphone.stop).toHaveBeenCalledOnce();await voice.setMuted(false);voice.closeMedia();expect(microphone.stop).toHaveBeenCalledTimes(2);
 });
+
+function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return{promise,resolve};}
+it('does not open a microphone after teardown while its permission request is pending',async()=>{
+ const f=await connected(),grant=deferred<void>();f.api.allowXboxMicrophone.mockReturnValueOnce(grant.promise);
+ const pending=f.voice.setMuted(false),rejected=expect(pending).rejects.toThrow('before microphone');
+ f.voice.closeMedia();grant.resolve();await rejected;expect(capture).not.toHaveBeenCalled();
+});
+it('stops a late microphone stream instead of attaching it to a replacement session',async()=>{
+ const f=await connected(),stream=deferred<any>();capture.mockReturnValueOnce(stream.promise);
+ const pending=f.voice.setMuted(false),rejected=expect(pending).rejects.toThrow('before microphone');
+ await vi.waitFor(()=>expect(capture).toHaveBeenCalledOnce());f.voice.closeMedia();stream.resolve({getTracks:()=>[microphone],getAudioTracks:()=>[microphone]});
+ await rejected;expect(microphone.stop).toHaveBeenCalledOnce();
+});
+it('does not create a server party when closed during initial local audio preparation',async()=>{
+ const prepared=deferred<void>();
+ vi.stubGlobal('RTCPeerConnection',class extends Peer{override addTransceiver(kind:string,options:{direction:string}){const value=super.addTransceiver(kind,options);if(options.direction==='sendonly')value.sender.replaceTrack.mockReturnValueOnce(prepared.promise);return value;}});
+ const f=fixture(),pending=f.voice.start();f.voice.closeMedia();prepared.resolve();await pending;
+ expect(f.api.startXboxParty).not.toHaveBeenCalled();expect(capture).not.toHaveBeenCalled();
+});
+it('cannot undo a newer voice-policy denial with an older successful response',async()=>{
+ const f=await connected(),first=deferred<boolean>(),second=deferred<boolean>();
+ f.api.xboxVoiceAllowed.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+ f.pc.channel.message('PeerAdded',{xuid:'2',transportSinkId:'0'});f.pc.channel.message('PrivacyChanged',{});
+ second.resolve(false);await Promise.resolve();await Promise.resolve();first.resolve(true);await Promise.resolve();await Promise.resolve();
+ expect(f.pc.transceivers[0].receiver.track.enabled).toBe(false);f.voice.closeMedia();
+});
+it('silences the previous transport before remapping a peer and rejects shared transport IDs',async()=>{
+ const f=await connected();f.api.xboxVoiceAllowed.mockResolvedValueOnce(true);
+ f.pc.channel.message('PeerAdded',{xuid:'2',transportSinkId:'0'});await Promise.resolve();await Promise.resolve();expect(f.pc.transceivers[0].receiver.track.enabled).toBe(true);
+ f.pc.channel.message('PeerAdded',{xuid:'2',transportSinkId:'1'});expect(f.pc.transceivers[0].receiver.track.enabled).toBe(false);
+ f.pc.channel.message('PeerAdded',{xuid:'3',transportSinkId:'1'});await vi.waitFor(()=>expect(f.api.leaveXboxParty).toHaveBeenCalledOnce());
+ expect(f.pc.connectionState).toBe('closed');expect(capture).not.toHaveBeenCalled();f.voice.closeMedia();
+});
+it('stops tracks delivered late by a disposed peer without creating playback elements',async()=>{
+ const f=await connected(),late=track();f.voice.closeMedia();
+ f.pc.ontrack!({track:late,transceiver:{mid:'0'}});expect(late.enabled).toBe(false);expect(late.stop).toHaveBeenCalledOnce();expect(capture).not.toHaveBeenCalled();
+});
+it('reports a failed start even when leaving the failed allocation succeeds',async()=>{
+ const f=fixture();f.api.startXboxParty.mockRejectedValueOnce(Error('Xbox rejected this connection.'));
+ await expect(f.voice.start()).rejects.toThrow('rejected');expect(f.api.leaveXboxParty).toHaveBeenCalledOnce();
+ expect(capture).not.toHaveBeenCalled();f.voice.closeMedia();
+});
