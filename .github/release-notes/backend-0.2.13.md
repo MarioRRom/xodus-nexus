@@ -1,4 +1,6 @@
 # Xodus Nexus backend 0.2.13
 
-- Publish a native aarch64 build next to x86_64.
-- Stop asking for an administrator password at sign-in on devices without an SMBIOS table (ARM handhelds): the firmware table is probed only when it exists.
+- Add native ARM64 builds and authenticated Social, chat and voice-party APIs.
+- Improve downloads and incremental updates while preserving verified data, recovery checkpoints and active game sessions.
+- Support Microsoft-designated offline play with account-bound licenses and revocation checks.
+- Fix Xbox authentication response handling and skip missing SMBIOS firmware tables at sign-in.
