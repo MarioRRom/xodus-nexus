@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add native arm64 launcher and backend builds, with architecture-aware downloads and updates. Thanks @indiesaudi.
+
 - Overlap local data verification and staged writes during game updates without changing checkpoint recovery.
 - Reduce download preparation time and memory use while preserving existing update checkpoints.
 - Improve game download and update performance with batched writes, parallel update transfers and fewer repeated local reads.
