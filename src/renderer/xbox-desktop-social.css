@@ -32,6 +32,8 @@
 .guide-summary-text strong { font-size:13px;font-weight:600; }
 .guide-summary-text small { font-size:11px;color:var(--muted);line-height:1.4; }
 .guide-state { margin-left:auto;padding:4px 9px;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:11px; }
+.guide-state.on { display:flex;align-items:center;gap:6px;color:#b5e2a3;border-color:#5c934d;background:#2d4029;font-weight:600; }
+.guide-state.on::before { content:'';width:6px;height:6px;border-radius:50%;background:#91d46e; }
 .guide-settings-content { padding:0 24px 20px;border-top:1px solid var(--line); }
 .guide-enable { display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 0;cursor:pointer; }
 .guide-enable>span { display:grid;gap:5px; }
