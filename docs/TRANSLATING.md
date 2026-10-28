@@ -84,6 +84,10 @@ The tool checks the entire plan before writing, refreshes each batch, accepts th
 original suggestion to preserve attribution, applies any checked correction and
 verifies the final text before marking it Reviewed. Comments, QA issues, outdated
 sources and changed cells stop the operation. Competing suggestions are not deleted.
+For an interrupted batch, inspect its report and current values before preparing
+a new plan. An explicit `existing: true` selection can review or correct an exact
+already-accepted text without accepting the original suggestion again. It requires
+that text and its current Translated or Reviewed state in the selection snapshot.
 
 Configure a separate `TOLGEE_REVIEW_API_KEY` repository secret, restricted to
 project **36162**, with `keys.view`, `translations.view`, `translations.edit` and
