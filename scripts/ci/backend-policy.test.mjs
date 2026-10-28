@@ -45,6 +45,24 @@ test('launch views left by killed sessions are swept only when no process holds 
   assert.doesNotMatch(added,/get_license|tokens\.|full_key|set_permissions|mount\(|chmod/);
 });
 
+test('plain-region metadata supplements launch images without replacing encrypted declarations (#417)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entries = ['xodus-plain-region-images.patch', 'xodus-plain-region-regressions.patch'];
+  for (const filename of entries) {
+    const entry = lock.patches.find(value => value.file === filename);
+    assert.ok(entry);
+    const patch = await fs.readFile(`assets/${filename}`, 'utf8');
+    assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+    assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]), ['crates/xodus-cli/src/commands/run.rs']);
+  }
+  assert.ok(lock.patches.findIndex(value => value.file === entries[1]) > lock.patches.findIndex(value => value.file === entries[0]));
+  const tests = await fs.readFile(`assets/${entries[1]}`, 'utf8');
+  for (const name of ['plain_region_metadata_declares_selected_executable_without_replacing_encrypted_files',
+    'plain_region_metadata_empty_read_preserves_all_existing_declarations',
+    'plain_region_metadata_keeps_path_signature_and_ambiguity_checks']) assert.ok(tests.includes(name), name);
+  assert.ok(tests.includes('!content.keep_encrypted && !known.contains'));
+});
+
 test('launch views require actual symbolic-link support and fall back only once (#341)',async()=>{
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(value=>value.file==='xodus-launch-filesystem.patch');assert.ok(entry);
@@ -163,6 +181,71 @@ test('JWE support changes only licensing ticket formatting, not Xbox or Store au
   assert.equal((patch.match(/^\+    let user_token = xodus::models::secrets::licensing_ticket\(user_token\);$/gm) ?? []).length, 2);
   const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
   assert.ok(build.includes("'-p', 'xodus', 'content_ticket_'"));
+});
+
+test('Xbox sign-in sends compact JWE delegation tickets as t= and keeps opaque tickets byte-exact (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(p => p.file === 'xodus-xbox-jwe-ticket.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  assert.ok(lock.patches.findIndex(p => p.file === entry.file) >
+    lock.patches.findIndex(p => p.file === 'xodus-licensing-jwe.patch'));
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(match => match[1]);
+  assert.deepEqual(files.sort(), ['crates/xodus/src/models/licensing_ticket_tests.rs', 'crates/xodus/src/models/secrets.rs']);
+  for (const expected of ['fn delegation_ticket(value: String) -> String',
+    'if is_compact_jwe(&value) { format!("t={value}") } else { format!("d={value}") }',
+    'xbox_delegation_ticket_prefix_follows_the_ticket_encoding']) assert.ok(patch.includes(expected), expected);
+  const removed = patch.split('\n').filter(line => line.startsWith('-') && !line.startsWith('---'));
+  assert.deepEqual(removed, [
+    '-        assert_eq!(original, format!("d={raw}"), "Xbox token conversion is unchanged");',
+    '-            "urn:passport:delegationcompact" => Self::Compact(format!(',
+    '-                "d={}",',
+    '-                    .value',
+    '-/// Keep Token conversion (Xbox) and store_ticket (Store) unchanged.',
+  ]);
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.ok(build.includes("'-p', 'xodus', 'xbox_delegation_ticket_'"));
+});
+
+test('game sign-in selects response types before persistence and propagates Sisu failures (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(value => value.file === 'xodus-auth-response-selection.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]).sort();
+  assert.deepEqual(files, ['crates/xodus/src/api/xbox/auth.rs', 'crates/xodus/src/auth.rs', 'crates/xodus/src/auth/sisu_response_tests.rs']);
+  for (const name of ['credential_sisu_selects_compact_and_refresh_tokens_independently_of_response_order',
+    'credential_sisu_keeps_jwe_opaque_and_single_response_ticket_formats',
+    'credential_sisu_rejects_missing_duplicate_unknown_and_malformed_tokens_without_payload_errors',
+    'xbox_delegation_ticket_reaches_the_real_user_request_without_an_extra_prefix']) assert.ok(patch.includes(name), name);
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.ok(added.includes('sisu_user_tokens(user_token)?'));
+  assert.ok(added.includes('.await?;'));
+  const build = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  for (const filter of ['credential_', 'xbox_delegation_ticket_', 'hosted_signin_']) assert.ok(build.includes(`'${filter}'`));
+});
+
+test('device registration rejects failed or malformed bounded responses without panicking (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(value => value.file === 'xodus-device-registration-response.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]).sort();
+  assert.deepEqual(files, ['crates/xodus/src/api/live/device_response_tests.rs', 'crates/xodus/src/api/live/mod.rs']);
+  for (const name of ['credential_device_response_accepts_complete_registration_without_rewriting_identity',
+    'credential_device_response_http_refusals_are_errors_not_panics_or_payload_logs',
+    'credential_device_response_rejects_malformed_incomplete_and_unsuccessful_payloads',
+    'credential_device_response_bounds_bodies_with_or_without_content_length']) assert.ok(patch.includes(name), name);
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.ok(added.includes('response.error_for_status()?'));
+  assert.ok(added.includes('response.chunk().await?'));
+  assert.ok(added.includes('!parsed.success'));
+  const production = patch.split('diff --git a/crates/xodus/src/api/live/device_response_tests.rs')[0]
+    .split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.doesNotMatch(production, /\.expect\(|\.unwrap\(/);
 });
 
 test('auth response consistency and coherent credential persistence are pinned and account-free tested', async () => {
