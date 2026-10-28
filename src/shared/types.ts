@@ -237,6 +237,8 @@ export interface KeyringStatus {
 export interface LauncherApi {setXboxOverlayRecording(recording:boolean):Promise<void>;}
 /** The Xbox app's "Offline permissions" setting for this device, as Microsoft reports it. */
 export interface OfflinePermissions {
+  /** Local launcher check, not a licensing grant or a Microsoft response field. */
+  launchSupported?: boolean;
   enabled: boolean;
   /** For a change: whether Microsoft applied it. */
   requestSuccess: boolean;

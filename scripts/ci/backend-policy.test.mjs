@@ -825,6 +825,21 @@ const offlinePatch = async (file, after) => {
   return { patch, files, added };
 };
 
+test('offline current-stack repair preserves launch barriers and authenticates private cached policy', async () => {
+  const {patch, files, added} = await offlinePatch('xodus-offline-current-stack.patch', 'xodus-offline-license-revocation.patch');
+  assert.deepEqual(files, ['crates/xodus-cli/src/installation_state.rs','crates/xodus-cli/src/license.rs','crates/xodus-cli/src/license_cache.rs','crates/xodus-cli/src/license_cache_tests.rs','crates/xodus/src/licensing.rs','crates/xodus/src/licensing/offline_integrity.rs']);
+  for (const text of ['Hmac::<Sha256>', 'mac.verify_slice(&tag)', 'nexus-offline-license-cache-v4', 'device.password.as_bytes()',
+    'if !self.authentic(&mut value)', 'value["lastUsedAt"]', 'self.seal(&mut value)', 'tempfile::NamedTempFile::new_in',
+    'nix::libc::O_NOFOLLOW', 'nix::libc::O_NONBLOCK', 'file.take(limit + 1)', '.revoked',
+    'offline_cache_authenticates_every_policy_field_and_requires_the_same_private_registration',
+    'offline_revocation_remains_closed_when_any_previous_entry_cannot_be_removed',
+    'offline_cache_never_reads_or_writes_through_a_root_or_entry_symlink',
+    'offline_lease_cannot_extend_a_trial_or_start_before_either_server_validity_window',
+    'keyValidity', 'LeaseCheck::Invalid("begin-date")', 'LeaseCheck::Invalid("not-yet-valid")']) assert.ok(patch.includes(text), text);
+  assert.doesNotMatch(added, /\.post\(|\.send\(|"deviceKey"|"contentKey"|"password"\s*:/);
+  assert.match(added, /None, None, false\)\.await/);
+});
+
 test('offline licenses are device-bound, fail closed and never bypass an online refusal', async () => {
   const { patch, files, added } = await offlinePatch('xodus-offline-license.patch', 'xodus-content-device-limit.patch');
   assert.deepEqual(files, [

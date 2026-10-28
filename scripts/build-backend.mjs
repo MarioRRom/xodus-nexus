@@ -50,11 +50,11 @@ command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'k
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'keyring_session_', '--', '--test-threads=1']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'keyring_persistence_', '--', '--test-threads=1']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_license_']);
+command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'smbios_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'xbox_delegation_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus-cli', 'hosted_signin_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'ticket_diagnostic_']);
-command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'smbios_']);
 command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'store_']);
 command('cargo', ['test', '--locked', ...offline, '-p', 'xodus-service', 'account_metadata_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'msixvc', 'streaming_']);
@@ -74,10 +74,13 @@ for (const name of ['xodus-cli', 'xodus-service']) {
 const help = command(cli, ['--help'], true);
 if (authUi === 'electron' && !help.includes('--external-webview-stdio')) throw Error('External sign-in capability missing');
 if (authUi === 'electron' && /lib(?:gtk|webkit|soup|javascriptcore)/i.test(command('readelf', ['-d', cli], true))) throw Error('Headless CLI links a native webview library');
-for (const name of ['account', 'login', 'logout', 'download', 'streaming', 'run', 'resolve-package', 'game-activity', 'achievements', 'social', 'keyring-unlock', 'keyring-create', 'keyring-session-stop']) {
+for (const name of ['account', 'login', 'logout', 'download', 'streaming', 'run', 'offline-pc', 'resolve-package', 'game-activity', 'achievements', 'social', 'keyring-unlock', 'keyring-create', 'keyring-session-stop']) {
   if (!new RegExp(`^\\s{2}${name}\\s{2,}`, 'm').test(help)) throw Error(`Backend lacks ${name}`);
 }
 if (!command(cli, ['run', '--help'], true).includes('--materialize-chain')) throw Error('Launch-chain support missing');
+const launchHelp = command(cli, ['run', '--help'], true);
+for (const flag of ['--license-cache', '--offline']) if (!launchHelp.includes(flag)) throw Error('Offline launch capability missing: ' + flag);
+if (!command(cli, ['offline-pc', '--help'], true).includes('--license-cache')) throw Error('Offline revocation capability missing');
 if (!command(cli, ['resolve-package', '--help'], true).includes('--include-dlc')) throw Error('Managed DLC selection capability missing');
 const streamingHelp = command(cli, ['streaming', '--help'], true);
 if (!streamingHelp.includes('Nexus capabilities: update-recovery-v1')) throw Error('Durable update recovery capability missing');

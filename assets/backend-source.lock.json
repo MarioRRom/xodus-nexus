@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v71",
+  "patchId": "linux-run-v72",
   "compatibility": "linux-run-v25",
   "patches": [
     {
@@ -282,7 +282,7 @@
     },
     {
       "file": "xodus-offline-license.patch",
-      "sha256": "ff882b6132e77434ef015e961b603382b2a7cffcba6ccc716c0b92a9c9b7639d"
+      "sha256": "5c2960a66adbb79e6c0a00a166f8f98470ea83c6041374eadb9c3d8ac1dbcd7e"
     },
     {
       "file": "xodus-offline-fast-path.patch",
@@ -295,6 +295,10 @@
     {
       "file": "xodus-offline-license-revocation.patch",
       "sha256": "d9363ca35087ea10eed2b8ba6c9d9a6f770384ce16da141b113ff83e1ac36776"
+    },
+    {
+      "file": "xodus-offline-current-stack.patch",
+      "sha256": "961f54e99cb0b21418c8cf56bf1a45790e91b21331736131e42eda08b663acf8"
     }
   ]
 }

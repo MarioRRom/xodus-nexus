@@ -30,9 +30,9 @@ import { RuntimeManager } from './runtime.js';
 import { prepareProtonRunner, syncPrefixUserLocale, syncUnrealCultureGameIni } from './proton.js';
 import { layoutOfWine } from './proton-layout.js';
 import { accountCacheKey } from './offline-identity.js';
-import { applyOfflinePermissions, bindOfflineAccess, licenseCacheDirectory, revokeOfflineAccess, type OfflineRevocation } from './offline-access.js';
+import { applyOfflinePermissions, assertOfflineAccessReady, bindOfflineAccess, licenseCacheDirectory, offlineAccessRevoked, revokeOfflineAccess, type OfflineRevocation } from './offline-access.js';
 import { CatalogService } from './catalog.js';
-import { cloudSaveRuntime, gameInviteRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
+import { cloudSaveRuntime, gameInviteRuntime, offlineIdentityRuntime, selectedWinePath, startXodusService, storeContentRuntime, storeDiscoveryRuntime, unbridgedCloudSaveRuntime, type XodusServiceSession } from './xodus-service.js';
 import { GameLogReducer, gameLoggingEnvironment, gameWindowEnvironment } from './game-log.js';
 import { downloadVerifiedVcRedist, installedVcRuntimeVersion, VC_REDIST_VERSION, versionAtLeast } from './vc-runtime.js';
 import { assertGameRemovalAvailable, validateGameDeleteTarget } from './game-removal.js';
@@ -378,6 +378,7 @@ function requireBackend(command: keyof typeof backend.current.capabilities): str
 }
 
 function ensureIdle(mode?: 'install' | 'launch' | 'remove'): void {
+  if (offlinePermissionChanging) throw Error('Wait for the offline-permission change to finish.');
   if (keyringSupport.busy) throw Error('Wait for the wallet operation to finish.');
   if (authState.running) throw Error('A sign-in operation is already in progress.');
   if (shutdownStarted) throw Error('The launcher is closing.');
@@ -520,23 +521,38 @@ async function settleOfflinePermissions(status: OfflinePermissions, changed: boo
   else if (await applyOfflinePermissions(offlineDataRoot(), status)) emitLog('offline', 'Removed stored offline licenses and identities (designation-off).');
   return status;
 }
-function offlineLicenseCache(): string | undefined {
+async function offlineLicenseCache(): Promise<string | undefined> {
+  if (await offlineAccessRevoked(offlineDataRoot())) await revokeOfflineAccess(offlineDataRoot());
+  await assertOfflineAccessReady(offlineDataRoot());
   return backend.current.capabilities.licenseCache ? licenseCacheDirectory(offlineDataRoot()) : undefined;
 }
 let designationCheck: Promise<void> | undefined;
+let offlinePermissionChanging = false;
+async function offlineLaunchSupported(): Promise<boolean> {
+  const wine = selectedWinePath(store.settings.winePath, store.settings.runtimeRoot, runtime.current.winePath);
+  return Boolean(backend.current.capabilities.licenseCache && backend.current.capabilities.offlineLaunch && wine && await offlineIdentityRuntime(wine));
+}
+function assertOfflineScope(account: string | undefined, binary: string, root: string): void {
+  if (shutdownStarted || authState.running || authState.stored !== true || !account || authState.username !== account || backend.current.binaryPath !== binary || offlineDataRoot() !== root)
+    throw Error('Account changed. Check offline permissions again.');
+}
 /** Back online: ask Microsoft whether this device is still the offline PC, so a
  * designation moved elsewhere while it was offline ends offline play here at
  * once instead of at the next launch. Reading costs no yearly change. */
 function verifyOfflineDesignation(): void {
-  if (designationCheck || shutdownStarted || authState.running || authState.stored !== true) return;
+  if (designationCheck || offlinePermissionChanging || shutdownStarted || authState.running || authState.stored !== true) return;
   const status = backend.current;
   if (!status.available || !status.binaryPath || !status.capabilities.offlinePc) return;
   const binary = status.binaryPath;
   designationCheck = (async () => {
     // Never open the wallet prompt from a background check.
     const keyring = await keyringSupport.check();
-    if (keyring.gameMode && keyring.state !== 'ready') return;
-    await settleOfflinePermissions(await readOfflinePermissions(backendRunner(binary), offlineLicenseCache()), false);
+    if (keyring.state !== 'ready') return;
+    const root = offlineDataRoot(), account = authState.username;
+    assertOfflineScope(account, binary, root);
+    const result = await readOfflinePermissions(backendRunner(binary), await offlineLicenseCache());
+    assertOfflineScope(account, binary, root);
+    await settleOfflinePermissions(result, false);
   })().catch(() => { /* Unanswered checks change nothing; the next launch or reconnect asks again. */ })
     .finally(() => { designationCheck = undefined; });
 }
@@ -1012,7 +1028,11 @@ async function prepareGameLaunch(id: string): Promise<void> {
   if (authState.stored === true && authState.username && await bindOfflineAccess(dataRoot, authState.username)) {
     emitLog('offline', 'Removed stored offline licenses and identities (account-changed).');
   }
-  const licenseCache = offlineLicenseCache();
+  const offlineRuntime = await offlineIdentityRuntime(wine);
+  if (offlineLaunch && (!offlineRuntime || !backend.current.capabilities.offlineLaunch)) {
+    throw new Error('Offline play requires a compatible Nexus backend and runtime. Update them in Settings while online.');
+  }
+  const licenseCache = offlineRuntime ? await offlineLicenseCache() : undefined;
   const args = gameLaunchArguments(inspected, wine, store.settings.market, backend.current.linuxRunPatch,
     licenseCache, offlineLaunch && Boolean(licenseCache && backend.current.capabilities.offlineLaunch));
   const operationId = `game-${id}`;
@@ -1080,6 +1100,11 @@ async function prepareGameLaunch(id: string): Promise<void> {
     delete environment.NEXUS_RELATED_PRODUCT_IDS;
     delete environment.NEXUS_INVITE_PORT;
     delete environment.NEXUS_INVITE_KEY;
+    // A shell's stale offline mode or another account must not influence this
+    // launch. The backend supplies identity mode only after license validation.
+    delete environment.XODUS_OFFLINE_IDENTITY;
+    delete environment.XODUS_FORCE_OFFLINE;
+    delete environment.XODUS_ACCOUNT_HASH;
     if (await storeDiscoveryRuntime(wine)) {
       const related = await contentManager().relatedProducts(game, accountLibrary.peekAccess(), currentMarket()).catch(() => {
         addGameLog('Additional DLC discovery unavailable. Continuing with package-declared content.');
@@ -1578,21 +1603,37 @@ function registerIpc(): void {
   ipcMain.handle('login', () => requestAuth('login'));
   ipcMain.handle('logout', () => requestAuth('logout'));
   ipcMain.handle('offline-permissions', async () => {
+    if (offlinePermissionChanging) throw Error('Wait for the offline-permission change to finish.');
+    if (authState.running || authState.stored !== true || !authState.username) throw Error('Sign in before changing offline permissions.');
+    const root = offlineDataRoot(), account = authState.username;
     const binary = requireBackend('offlinePc');
     await prepareSystemWallet();
-    return settleOfflinePermissions(await readOfflinePermissions(backendRunner(binary), offlineLicenseCache()), false);
+    assertOfflineScope(account, binary, root);
+    const result = await readOfflinePermissions(backendRunner(binary), await offlineLicenseCache());
+    const launchSupported = await offlineLaunchSupported();
+    assertOfflineScope(account, binary, root);
+    return { ...await settleOfflinePermissions(result, false), launchSupported };
   });
   ipcMain.handle('set-offline-permissions', async (_event, enabled: unknown) => {
     // The renderer confirms with the user first; Microsoft counts every change against a yearly limit.
     if (typeof enabled !== 'boolean') throw Error('Invalid offline-permission request.');
     ensureIdle();
+    if (authState.running || authState.stored !== true || !authState.username) throw Error('Sign in before changing offline permissions.');
+    offlinePermissionChanging = true;
+    try {
+    const root = offlineDataRoot(), account = authState.username;
     const binary = requireBackend('offlinePc');
+    const launchSupported = await offlineLaunchSupported();
+    if (enabled && !launchSupported) throw Error('Offline play requires a compatible Nexus backend and runtime. Update them in Settings while online.');
     await prepareSystemWallet();
-    const result = await changeOfflinePermissions(backendRunner(binary), enabled, offlineLicenseCache());
+    assertOfflineScope(account, binary, root);
+    const result = await changeOfflinePermissions(backendRunner(binary), enabled, await offlineLicenseCache());
+    assertOfflineScope(account, binary, root);
     accountRefresh.invalidate();
     // Either direction starts over, as in the Xbox app: licenses stored before
     // the change are never used again and each game needs one online launch.
-    return settleOfflinePermissions(result, true);
+    return { ...await settleOfflinePermissions(result, true), launchSupported };
+    } finally { offlinePermissionChanging = false; }
   });
   ipcMain.handle('catalog-search', (_event, query: string, cursor?: string) => {
     return catalog.search(query, catalogMarket(), cursor);

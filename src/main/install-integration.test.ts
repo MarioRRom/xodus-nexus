@@ -28,8 +28,11 @@ const h = vi.hoisted(() => ({
   holdAccountReads: false,
   contentSupported: false,
   discoverySupported: false,
+  offlineRuntimeSupported: false,
+  connectivityState: 'unknown' as 'unknown'|'online'|'offline',
   libraryReads: 0,
   launchEnvironments: [] as NodeJS.ProcessEnv[],
+  launchArguments: [] as string[][],
   backendRefreshes: 0, runtimeRefreshes: 0,
   accountRequests: 0,
   prefixLocales: [] as (string | undefined)[],
@@ -78,7 +81,13 @@ vi.mock('./install-plan.js', async original => ({ ...await original<typeof impor
   }),
 }));
 vi.mock('./xodus-service.js', () => ({ cloudSaveRuntime: async () => false, unbridgedCloudSaveRuntime: async () => false,
+  offlineIdentityRuntime: async () => h.offlineRuntimeSupported,
   selectedWinePath: () => h.wine, storeContentRuntime: async () => h.contentSupported, storeDiscoveryRuntime: async () => h.discoverySupported, startXodusService: vi.fn() }));
+// No public connectivity probes from an account-free launch integration fixture.
+vi.mock('./connectivity.js',()=>({ConnectivityMonitor:class {
+  get current(){return {state:h.connectivityState};} start(){} stop(){}
+  async check(){return this.current;}
+}}));
 vi.mock('./proton.js', () => ({ prepareProtonRunner: async () => undefined, syncPrefixUserLocale: async (_wine: string, _prefix: string, locale: string | undefined) => { h.prefixLocales.push(locale); }, syncUnrealCultureGameIni: async () => {} }));
 vi.mock('./game-wrapper.js', () => ({ prepareGameWrapper: async () => ({ command: h.wine, cleanup: async () => {} }) }));
 vi.mock('./process.js', () => ({
@@ -103,6 +112,7 @@ vi.mock('./process.js', () => ({
   },
 }));
 vi.mock('./game-process.js', () => ({ spawnGameProcess: async (_command:string,_args:string[],options:{env:NodeJS.ProcessEnv}) => {
+  h.launchArguments.push([..._args]);
   h.launchEnvironments.push({...options.env});
   let resolve!: (result: { code: number; output: string }) => void;
   const result = new Promise<{ code: number; output: string }>(done => { resolve = done; });
@@ -497,6 +507,39 @@ it('saves and launches locale overrides without catalog or exhaustive manifest l
     if (oldPackage === undefined) delete process.env.XODUS_PACKAGE_LOCALE; else process.env.XODUS_PACKAGE_LOCALE = oldPackage;
     if (oldWine === undefined) delete process.env.WINEUSERLOCALE; else process.env.WINEUSERLOCALE = oldWine;
     h.blockDisplay.mockClear(); h.releaseDisplay.mockClear();
+  }
+});
+
+it('launches offline only with both compatible components and discards inherited identity modes', async () => {
+  const keys=['XODUS_FORCE_OFFLINE','XODUS_OFFLINE_IDENTITY','XODUS_ACCOUNT_HASH'] as const;
+  const old=keys.map(key=>process.env[key]);
+  const cache=h.backend.capabilities.licenseCache,launch=h.backend.capabilities.offlineLaunch;
+  try {
+    for(const key of keys)process.env[key]='foreign';
+    h.connectivityState='offline';h.offlineRuntimeSupported=false;
+    const count=h.launchEnvironments.length;
+    await expect(ipc('launch-game','sample')).rejects.toThrow('compatible Nexus backend and runtime');
+    expect(h.launchEnvironments).toHaveLength(count);
+    h.offlineRuntimeSupported=true;h.backend.capabilities.offlineLaunch=false;
+    await expect(ipc('launch-game','sample')).rejects.toThrow('compatible Nexus backend and runtime');
+    expect(h.launchEnvironments).toHaveLength(count);
+    h.backend.capabilities.licenseCache=true;h.backend.capabilities.offlineLaunch=true;
+    for(const offline of [false,true]) {
+      h.connectivityState=offline?'offline':'online';
+      await ipc('launch-game','sample');
+      const env=h.launchEnvironments.at(-1)!,args=h.launchArguments.at(-1)!;
+      expect(env.XODUS_FORCE_OFFLINE).toBe(offline?'1':undefined);
+      expect(env.XODUS_OFFLINE_IDENTITY).toBeUndefined();
+      expect(env.XODUS_ACCOUNT_HASH).toMatch(/^[a-f0-9]{32}$/);
+      expect(args.includes('--offline')).toBe(offline);expect(args).toContain('--license-cache');
+      h.game!.finish(0);await vi.waitFor(()=>expect(snapshot().gameOperation.status).toBe('complete'));
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+  } finally {
+    keys.forEach((key,index)=>{if(old[index]===undefined)delete process.env[key];else process.env[key]=old[index];});
+    h.backend.capabilities.licenseCache=cache;h.backend.capabilities.offlineLaunch=launch;
+    h.connectivityState='unknown';h.offlineRuntimeSupported=false;
+    h.blockDisplay.mockClear();h.releaseDisplay.mockClear();
   }
 });
 
