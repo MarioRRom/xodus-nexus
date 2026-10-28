@@ -6,7 +6,7 @@ on:
       mode:
         description: 'Preview, accept, or accept and mark technically checked translations Reviewed'
         type: choice
-        options: [preview, review-texts, accept, accept-and-review]
+        options: [preview, review-texts, accept, accept-and-review, preview-reviewed-plan, apply-reviewed-plan]
         default: preview
       languages:
         description: 'Optional comma-separated target language tags, e.g. fr,es. Empty selects all targets.'
@@ -45,7 +45,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Check acceptance tooling without credentials
-        run: node --test scripts/ci/tolgee-accept.test.mjs
+        run: node --test scripts/ci/tolgee-accept.test.mjs scripts/ci/tolgee-review-plan.test.mjs
       - name: Process suggestions
         env:
           TOLGEE_REVIEW_API_KEY: ${{ secrets.TOLGEE_REVIEW_API_KEY }}
@@ -56,6 +56,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$REVIEW_MODE" = preview-reviewed-plan ] || [ "$REVIEW_MODE" = apply-reviewed-plan ]; then
+            plan_args=("$REVIEW_DIGEST")
+            if [ "$REVIEW_MODE" = apply-reviewed-plan ]; then plan_args+=(--apply); fi
+            node scripts/tolgee-review-plan.mjs "${plan_args[@]}" | tee tolgee-suggestion-report.json
+            exit 0
+          fi
           args=()
           case "$REVIEW_MODE" in
             preview) ;;

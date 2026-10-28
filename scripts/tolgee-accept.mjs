@@ -22,7 +22,7 @@ export function fromTolgee(text) {
   return result;
 }
 
-function tokens(text) {
+export function tokens(text) {
   return (text.match(/\{\{[a-zA-Z][a-zA-Z0-9_]*\}\}|https?:\/\/[^\s<>]+|`[^`]+`|\b(?:Xbox|Microsoft|Xodus|Nexus|Tolgee|Steam)\b|--[a-z][a-z0-9-]*/g) ?? []).sort();
 }
 
@@ -78,8 +78,9 @@ export function assess(row, language, english) {
 export function createApi(key, fetcher = fetch, wait = pause, interval = 0) {
   if (typeof key !== 'string' || !key.trim() || /[\r\n]/.test(key)) throw Error('Set TOLGEE_REVIEW_API_KEY to a project-scoped review key.');
   let lastRequest = 0;
-  return async (route, method = 'GET') => {
+  return async (route, method = 'GET', body) => {
     if (!route.startsWith(`${project}/`) || route.includes('..') || /[\\#\r\n]/.test(route) || !['GET', 'PUT'].includes(method)) throw Error('Invalid API operation.');
+    if (body !== undefined && (method !== 'PUT' || route !== `${project}/translations` || !body || typeof body !== 'object')) throw Error('Invalid translation update body.');
     let response;
     for (let attempt = 0; attempt < 3; attempt++) {
       const spacing = interval - (Date.now() - lastRequest);
@@ -87,7 +88,8 @@ export function createApi(key, fetcher = fetch, wait = pause, interval = 0) {
       lastRequest = Date.now();
       try {
         response = await fetcher(`https://app.tolgee.io${route}`, {
-          method, headers: { 'X-API-Key': key, accept: 'application/json' },
+          method, headers: { 'X-API-Key': key, accept: 'application/json', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           redirect: 'error', signal: AbortSignal.timeout(15000),
         });
       } catch { throw Error(`Tolgee ${method} transport failed. No automatic retry; check the report before rerunning.`); }
@@ -119,7 +121,7 @@ export function createApi(key, fetcher = fetch, wait = pause, interval = 0) {
   };
 }
 
-async function pages(api, route, collection, limit) {
+export async function pages(api, route, collection, limit) {
   const all = []; const seen = new Set();
   for (let page = 0; page < 100; page++) {
     const value = await api(`${route}${route.includes('?') ? '&' : '?'}size=100&page=${page}`);
@@ -136,7 +138,7 @@ async function pages(api, route, collection, limit) {
   throw Error('Too many Tolgee pages.');
 }
 
-function viewRoute(tags, keyId) {
+export function viewRoute(tags, keyId) {
   const query = new URLSearchParams();
   for (const tag of tags) query.append('languages', tag);
   query.set('sort', 'keyId,asc');
