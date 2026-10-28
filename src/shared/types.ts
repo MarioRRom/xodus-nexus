@@ -142,6 +142,8 @@ export interface DownloadTask {
   cancelling?: boolean;
   progress: number | null;
   downloadedBytes?: number;
+  networkBytes?: number;
+  reusedBytes?: number;
   totalBytes?: number;
   transferRate?: string;
   coverUrl?: string; // Store box art for the queued product, for the queue list.
