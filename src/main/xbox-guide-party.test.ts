@@ -30,7 +30,7 @@ it('routes explicit commands from both views to the same existing owner exactly 
 it('rejects every mutation from a hidden or revoked Guide but allows cached state reads',async()=>{
  const f=fixture();f.hide();
  for(const [method,args] of [['controlXboxVoice',[{type:'start'}]],['controlXboxVoice',[{type:'setMuted',muted:false}]],['controlXboxVoice',[{type:'leave'}]],['leaveExistingXboxParty',['existing']],['inviteXboxPartyFriend',['2']]] as const)
-  await expect(f.guide.invoke(method,[...args])).rejects.toThrow('Open the Guide');
+  await expect(f.guide.invoke(method,[...args])).rejects.toThrow('Open the Overlay');
  expect(f.voice.control).not.toHaveBeenCalled();expect(f.party.invite).not.toHaveBeenCalled();expect(f.party.leaveExisting).not.toHaveBeenCalled();
  expect(await f.guide.invoke('getXboxVoiceState',[])).toMatchObject({muted:true});
 });

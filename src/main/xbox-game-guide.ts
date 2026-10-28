@@ -5,16 +5,16 @@ import {externalLauncherEnvironment} from './launcher-environment.js';
 import {XboxGuideServer,type GuideEvent,type GuideInitial} from './xbox-guide-server.js';
 
 export type GuideMonitor={x:number;y:number;width:number;height:number};
-const monitorUnavailable='Nexus Guide could not locate the game window on a supported display. Keep the game open and try again.';
+const monitorUnavailable='Nexus Overlay could not locate the game window on a supported display. Keep the game open and try again.';
 type Options={directory:string;helper:string;account:()=>string|undefined;initial:()=>GuideInitial;invoke:(method:string,args:unknown[])=>Promise<unknown>;problem:(message:string)=>void;monitor:()=>GuideMonitor;enabled:()=>boolean};
 export async function checkGuideHost(helper:string):Promise<void>{
  try{
   const {stdout}=await promisify(execFile)('/usr/bin/python3',['-B',helper,'--check'],{env:externalLauncherEnvironment(process.env),timeout:3000,maxBuffer:8192});
   if(JSON.parse(stdout).ready!==true)throw Error('unavailable');
- }catch{throw Error('Nexus Guide requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Install these dependencies and try again.');}
+ }catch{throw Error('Nexus Overlay requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Install these dependencies and try again.');}
 }
 export function gameGuideMonitor(value:GuideMonitor):GuideMonitor{
- if(!value||!['x','y','width','height'].every(key=>Number.isSafeInteger(value[key as keyof GuideMonitor]))||Math.abs(value.x)>131072||Math.abs(value.y)>131072||value.width<=0||value.height<=0||value.width>32768||value.height>32768)throw Error('Nexus Guide monitor unavailable.');
+ if(!value||!['x','y','width','height'].every(key=>Number.isSafeInteger(value[key as keyof GuideMonitor]))||Math.abs(value.x)>131072||Math.abs(value.y)>131072||value.width<=0||value.height<=0||value.width>32768||value.height>32768)throw Error('Nexus Overlay monitor unavailable.');
  return {x:value.x,y:value.y,width:value.width,height:value.height};
 }
 
@@ -90,13 +90,13 @@ export class XboxGameGuide {
     if(!this.game||!this.options.enabled())return false;
     await this.refresh();if(!this.view)return false;
     const bound=this.game;
-    void this.show().catch(error=>{if(this.game===bound)this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Guide could not open. Reopen the guide and try again.');});
+    void this.show().catch(error=>{if(this.game===bound)this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Overlay could not open. Reopen the overlay and try again.');});
     return true;
   }
   showProfile(id:string,xuid:string,closed:()=>void):void{
-    if(this.profile||!this.game||!this.options.enabled())throw Error('Enable the Nexus Guide in Nexus Settings to view game profiles.');
+    if(this.profile||!this.game||!this.options.enabled())throw Error('Enable the Nexus Overlay in Nexus Settings to view game profiles.');
     this.profile={id,xuid};this.profileClosed=closed;this.publish('profile',this.profileRequest);
-    void this.show().catch(error=>{if(this.profile?.id===id){this.hide(false);this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Guide could not display the player profile.');}});
+    void this.show().catch(error=>{if(this.profile?.id===id){this.hide(false);this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Overlay could not display the player profile.');}});
   }
   completeProfile(id:string,hide=true):void{
     if(this.profile?.id!==id)return;
@@ -105,11 +105,11 @@ export class XboxGameGuide {
   }
   private async show():Promise<void>{
     if(!this.view)await this.refresh();
-    if(!this.options.enabled())throw Error('Enable the Nexus Guide in Nexus Settings.');
+    if(!this.options.enabled())throw Error('Enable the Nexus Overlay in Nexus Settings.');
     this.wanted=true;
     if(this.opening){await this.opening;if(this.wanted)this.child?.stdin.write('show\n');return;}
     if(this.child){this.child.stdin.write('show\n');return;}
-    if(!this.game||!this.view||!this.options.account()){this.wanted=false;throw Error('Nexus Guide game session unavailable.');}
+    if(!this.game||!this.view||!this.options.account()){this.wanted=false;throw Error('Nexus Overlay game session unavailable.');}
     const generation=this.generation,view=this.view,account=this.options.account();this.session=account;
     const opening=(async()=>{
       const session=()=>generation===this.generation&&this.game&&this.options.enabled()?this.options.account():undefined;
@@ -128,8 +128,8 @@ export class XboxGameGuide {
       child.stdin.on('error',()=>{});child.stderr.resume();
       await new Promise<void>((resolve,reject)=>{
         let ready=false,pending='';
-        const timer=setTimeout(()=>{reject(Error('Nexus Guide load timed out.'));if(generation===this.generation)this.reset();else child.stdin.end('quit\n');},35_000);timer.unref();
-        const failed=()=>{clearTimeout(timer);if(!ready)reject(Error('Nexus Guide host exited.'));if(this.child===child){this.child=undefined;this.hide(false);if(ready&&generation===this.generation)this.options.problem('Nexus Guide closed unexpectedly. Reopen the guide and try again.');}void server.stop();if(this.http===server)this.http=undefined;};
+        const timer=setTimeout(()=>{reject(Error('Nexus Overlay load timed out.'));if(generation===this.generation)this.reset();else child.stdin.end('quit\n');},35_000);timer.unref();
+        const failed=()=>{clearTimeout(timer);if(!ready)reject(Error('Nexus Overlay host exited.'));if(this.child===child){this.child=undefined;this.hide(false);if(ready&&generation===this.generation)this.options.problem('Nexus Overlay closed unexpectedly. Reopen the overlay and try again.');}void server.stop();if(this.http===server)this.http=undefined;};
         child.once('error',failed);child.once('exit',failed);
         child.stdout.on('data',bytes=>{
           if(generation!==this.generation||this.child!==child)return;
@@ -138,7 +138,7 @@ export class XboxGameGuide {
             if(value.event==='ready'){ready=true;clearTimeout(timer);resolve();}
             if(value.event==='shown'){this.visible=this.wanted;this.publish('visibility',this.visible);if(!this.wanted)child.stdin.write('hide\n');}
             if(value.event==='hidden'){this.visible=false;this.wanted=false;this.publish('visibility',false);if(this.profile)this.completeProfile(this.profile.id,false);}
-            if(value.event==='error'){reject(Error(value.code==='game-monitor-unavailable'?monitorUnavailable:'Nexus Guide host unavailable.'));this.reset();}
+            if(value.event==='error'){reject(Error(value.code==='game-monitor-unavailable'?monitorUnavailable:'Nexus Overlay host unavailable.'));this.reset();}
           }catch{}}
         });
         child.stdin.write(JSON.stringify({url,token:server.token,monitor:view.monitor,...(this.game?.pid?{gamePid:this.game.pid}:{})})+'\n');

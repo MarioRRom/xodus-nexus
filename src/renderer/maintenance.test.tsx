@@ -13,8 +13,8 @@ it('keeps Social out of the sidebar now that Friends has its own dock',()=>{
 it('offers an app-owned overlay shortcut and left/right shelf settings with left as the default',()=>{
   const html=renderToStaticMarkup(<SettingsPage data={demoSnapshot()} toast={()=>{}}/>);
   expect(html).toContain('Keyboard shortcut');expect(html).toContain('Super+G');expect(html).toContain('Shelf position');expect(html).toContain('value="left" selected');
-  expect(html.indexOf('Storage and launch paths')).toBeLessThan(html.indexOf('aria-label="Nexus Guide"'));
-  expect(html).toMatch(/<details class="settings-card settings-guide" aria-label="Nexus Guide">/);
+  expect(html.indexOf('Storage and launch paths')).toBeLessThan(html.indexOf('aria-label="Nexus Overlay"'));
+  expect(html).toMatch(/<details class="settings-card settings-guide" aria-label="Nexus Overlay">/);
   expect(html).not.toContain('Desktop portal');
 });
 it('keeps backend health and launcher update notices distinct', () => {

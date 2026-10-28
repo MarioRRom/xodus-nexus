@@ -56,6 +56,6 @@ it('reports an unresolved game display honestly instead of choosing the cursor m
  const problem=vi.fn(),guide=new XboxGameGuide({directory,helper,account:()=> 'synthetic',initial:()=>({auth:{},profile:null}),invoke:async()=>{},problem,monitor:()=>({x:0,y:0,width:1920,height:1080}),enabled:()=>true});guides.push(guide);
  for(const pid of [-1,0,NaN,1.5,2**31])expect(()=>guide.bind('fixture','Synthetic',pid)).toThrow('process');
  guide.bind('fixture','Synthetic',43210);await guide.toggle();
- await vi.waitFor(()=>expect(problem).toHaveBeenCalledWith('Nexus Guide could not locate the game window on a supported display. Keep the game open and try again.'));
+ await vi.waitFor(()=>expect(problem).toHaveBeenCalledWith('Nexus Overlay could not locate the game window on a supported display. Keep the game open and try again.'));
  expect(guide.interactive).toBe(false);
 });
