@@ -338,6 +338,9 @@ export interface CatalogProduct {
   supportNote: string;
 }
 
+/** A saved installation ID, or an explicit read-only Store catalog identity. */
+export type GameDetailsTarget = string | {productId:string};
+
 /** Public catalog data only, never an ownership/installation decision. */
 export interface GameStoreDetails {
   productId: string;
@@ -347,6 +350,7 @@ export interface GameStoreDetails {
   heroUrl?: string;
   categories: string[];
   screenshots: string[];
+  xboxTitleId?: string;
   releaseDate?: string;
 }
 
@@ -588,9 +592,9 @@ export interface LauncherApi {
   getGameLocales(id: string): Promise<string[]>;
   removeGame(id: string, mode: 'library' | 'delete-files'): Promise<void>;
   getGameLaunchOptions(id: string): Promise<GameLaunchOptions>;
-  getGameDetails(id: string): Promise<GameStoreDetails | undefined>;
-  getGameActivity(id: string, refresh?: boolean): Promise<GameActivity>;
-  getGameAchievements(id: string, refresh?: boolean): Promise<GameAchievements>;
+  getGameDetails(id: GameDetailsTarget): Promise<GameStoreDetails | undefined>;
+  getGameActivity(id: GameDetailsTarget, refresh?: boolean): Promise<GameActivity>;
+  getGameAchievements(id: GameDetailsTarget, refresh?: boolean): Promise<GameAchievements>;
   launchGame(id: string): Promise<void>;
   createGameShortcut(id: string, destination: 'desktop' | 'applications'): Promise<string>;
   addToSteam(id?: string): Promise<string>;

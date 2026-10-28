@@ -63,6 +63,7 @@ import { AccountRefresh, readAccount } from './account-refresh.js';
 import { AccountLibrary } from './account-library.js';
 import { RecentPcGamePass } from './gamepass-recent.js';
 import { GameActivities, installedTitleId } from './game-activity.js';
+import {gameDetailsTarget} from './game-details-target.js';
 import { GameAchievementsReader } from './game-achievements.js';
 import { GameContent, type ContentPackage } from './game-content.js';
 import { backendRunner, changeOfflinePermissions, readOfflinePermissions } from './offline-permissions.js';
@@ -1394,9 +1395,10 @@ function registerDemoIpc(catalogMarket: () => string): void {
   });
   ipcMain.handle('remove-game', () => {});
   ipcMain.handle('game-launch-options', () => demoLaunchOptions);
-  ipcMain.handle('game-details', async (_event, id: string) => {
+  ipcMain.handle('game-details', async (_event, id: unknown) => {
     const game = demoGames.find(game => game.id === id);
-    return game?.storeId ? catalog.gameDetails(game.storeId, catalogMarket()) : undefined;
+    const target=typeof id==='object'?gameDetailsTarget(id,[]):game?gameDetailsTarget(id,demoGames):undefined;
+    return target?.productId ? catalog.gameDetails(target.productId, catalogMarket()) : undefined;
   });
   ipcMain.handle('game-activity', () => ({ status: 'unavailable' }));
   ipcMain.handle('game-achievements', () => ({ status: 'unavailable' }));
@@ -1711,43 +1713,44 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle('game-launch-options', (_event, id: string) => gameLaunchOptions(id));
-  ipcMain.handle('game-details', async (_event, id: string) => {
-    const game = store.games.find(game => game.id === id);
-    if (!game) throw Error('Game not found.');
-    if (!game.storeId || !/^[A-Z0-9]{12}$/.test(game.storeId)) return undefined;
+  ipcMain.handle('game-details', async (_event, id: unknown) => {
+    const target=gameDetailsTarget(id,store.games);
+    if (!target.productId) return undefined;
     const market = currentMarket();
-    const details = await catalog.gameDetails(game.storeId, market);
+    const details = await catalog.gameDetails(target.productId, market);
     if (market !== currentMarket()) throw Error('Store market changed. Try again.');
     return details;
   });
-  ipcMain.handle('game-activity', async (_event, id: string, refresh = false) => {
-    if (typeof id !== 'string' || typeof refresh !== 'boolean') throw Error('Invalid activity request.');
-    const game = store.games.find(game => game.id === id);
-    if (!game) throw Error('Game not found.');
+  ipcMain.handle('game-activity', async (_event, id: unknown, refresh = false) => {
+    if (typeof refresh !== 'boolean') throw Error('Invalid activity request.');
+    const target=gameDetailsTarget(id,store.games),market=currentMarket();
     if (authState.running || authState.stored !== true || !authState.username) return { status: 'signed-out' };
     if (!backend.current.capabilities.gameActivity || !backend.current.binaryPath) return { status: 'unsupported' };
     const account = authState.username, binary = backend.current.binaryPath;
     gameActivities.select(account, binary);
-    const title = await installedTitleId(game.path).catch(() => undefined);
+    let title:string|undefined;
+    try{title=target.game?await installedTitleId(target.game.path):await catalog.gameDetails(target.productId!,market).then(details=>details?.xboxTitleId);}
+    catch{return {status:'error'};}
     if (!title) return { status: 'unavailable' };
-    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath) return { status: 'error' };
+    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath || !target.game&&market!==currentMarket()) return { status: 'error' };
     const activity = await gameActivities.get(title, refresh);
-    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath) return { status: 'error' };
+    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath || !target.game&&market!==currentMarket()) return { status: 'error' };
     return activity;
   });
-  ipcMain.handle('game-achievements', async (_event, id: string, refresh = false) => {
-    if (typeof id !== 'string' || typeof refresh !== 'boolean') throw Error('Invalid achievements request.');
-    const game = store.games.find(game => game.id === id);
-    if (!game) throw Error('Game not found.');
+  ipcMain.handle('game-achievements', async (_event, id: unknown, refresh = false) => {
+    if (typeof refresh !== 'boolean') throw Error('Invalid achievements request.');
+    const target=gameDetailsTarget(id,store.games),market=currentMarket();
     if (authState.running || authState.stored !== true || !authState.username) return { status: 'signed-out' };
     if (!backend.current.capabilities.achievements || !backend.current.binaryPath) return { status: 'unsupported' };
     const account = authState.username, binary = backend.current.binaryPath;
     gameAchievements.select(account, binary);
-    const title = await installedTitleId(game.path).catch(() => undefined);
+    let title:string|undefined;
+    try{title=target.game?await installedTitleId(target.game.path):await catalog.gameDetails(target.productId!,market).then(details=>details?.xboxTitleId);}
+    catch{return {status:'error'};}
     if (!title) return { status: 'unavailable' };
-    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath) return { status: 'error' };
+    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath || !target.game&&market!==currentMarket()) return { status: 'error' };
     const value = await gameAchievements.get(title, refresh);
-    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath) return { status: 'error' };
+    if (authState.running || authState.stored !== true || account !== authState.username || binary !== backend.current.binaryPath || !target.game&&market!==currentMarket()) return { status: 'error' };
     return value;
   });
   ipcMain.handle('launch-game', (_event, id: string) => launchGame(id));
