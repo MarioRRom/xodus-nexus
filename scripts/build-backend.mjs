@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { backendSourceArchiveArgs } from './backend-source-archive.mjs';
+import { backendOfflineCargoConfig, backendSourceArchiveArgs } from './backend-source-archive.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const args = process.argv.slice(2);
@@ -102,8 +102,12 @@ command('tar', ['-cJf', path.join(output, `${name}.tar.xz`), '-C', work, name]);
 // Include vendored registry/Git dependency sources and offline Cargo config,
 // alongside patched upstream source, GPL license, recipe and build tooling.
 const config = command('cargo', ['vendor', '--locked', ...offline, 'vendor'], true);
+const originalCargoConfig = await fs.readFile(path.join(source, '.cargo/config.toml'), 'utf8').catch(error => {
+  if (error.code === 'ENOENT') return '';
+  throw error;
+});
 await fs.mkdir(path.join(source, '.cargo'), { recursive: true });
-await fs.writeFile(path.join(source, '.cargo/config.toml'), config);
+await fs.writeFile(path.join(source, '.cargo/config.toml'), backendOfflineCargoConfig(originalCargoConfig, config));
 const recipe = path.join(work, 'recipe');
 await fs.mkdir(path.join(recipe, 'assets'), { recursive: true });
 await fs.copyFile(path.join(root, 'assets/backend-source.lock.json'), path.join(recipe, 'assets/backend-source.lock.json'));

@@ -94,7 +94,15 @@ test('native inbox is nonblocking and conversation validation retains account an
  assert.doesNotMatch(added,/\.post\(|\.delete\(|cache_xsts|set_user|horizon|AuthKey/);
  assert.ok(patch.includes('-            }).buffer_unordered(4).collect().await;'));
 });
-import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
+import { backendOfflineCargoConfig, backendSourceArchiveArgs } from '../backend-source-archive.mjs';
+
+test('vendored offline source retains the exact x86 and ARM AES compiler flags', async () => {
+  const flags = '[target.\'cfg(target_arch = "x86_64")\']\nrustflags = ["-Ctarget-feature=+aes,+ssse3"]\n\n[target.\'cfg(target_arch = "aarch64")\']\nrustflags = ["-Ctarget-feature=+aes"]\n';
+  const vendor = '[source.crates-io]\nreplace-with = "vendored-sources"\n[source.vendored-sources]\ndirectory = "vendor"\n';
+  assert.equal(backendOfflineCargoConfig(flags, vendor), flags.trimEnd() + '\n\n' + vendor);
+  const script = await fs.readFile('scripts/build-backend.mjs', 'utf8');
+  assert.match(script, /backendOfflineCargoConfig\(originalCargoConfig, config\)/);
+});
 
 test('incremental updates retain verified reuse and a durable launch barrier until metadata commit (#405)', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
