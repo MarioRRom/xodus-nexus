@@ -26,7 +26,12 @@ class SocialBroker {
         if(this.active===job){this.finish(job,undefined,Error('Xbox social request cancelled.'));return;}
         const index=this.queue.indexOf(job);if(index!==-1){this.queue.splice(index,1);this.finish(job,undefined,Error('Xbox social request cancelled.'));}
       }};
-      signal.addEventListener('abort',job.abort,{once:true});this.queue.push(job);
+      signal.addEventListener('abort',job.abort,{once:true});
+      // Interactive chat must not wait behind a batch of optional profile reads.
+      if(args[0]==='conversation'||args[0]==='send-message'){
+        const optional=this.queue.findIndex(value=>!['conversation','send-message'].includes(value.args[0]));
+        if(optional<0)this.queue.push(job);else this.queue.splice(optional,0,job);
+      }else this.queue.push(job);
       if(signal.aborted)job.abort();else this.pump();
     });
   }

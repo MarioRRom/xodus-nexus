@@ -14,8 +14,8 @@ function avatar(value:unknown):value is string{
 const optionalAvatar=(value:unknown)=>value===undefined||value===null||avatar(value);
 const picture=(value:string|null|undefined)=>value?{avatarUrl:value}:{};
 function message(value: unknown): value is XboxMessage {
-  return object(value) && string(value.id,256) && (value.sender==='0' || id(value.sender)) && string(value.text,140_000)
-    && (value.timestamp === null || string(value.timestamp,64)) && typeof value.hidden === 'boolean' && typeof value.mine === 'boolean';
+  return object(value) && string(value.id,256) && Boolean(value.id.trim()) && !/[\x00-\x1f\x7f]/.test(value.id) && (value.sender==='0' || id(value.sender)) && string(value.text,262144)
+    && (value.timestamp === null || string(value.timestamp,64)&&/^\d{4}-\d{2}-\d{2}T/.test(value.timestamp)&&Number.isFinite(Date.parse(value.timestamp))) && typeof value.hidden === 'boolean' && typeof value.mine === 'boolean';
 }
 function friend(value: unknown): value is XboxFriend {
   return object(value) && id(value.xuid) && string(value.gamertag,256) && Boolean(value.gamertag)
@@ -78,7 +78,7 @@ function conversation(value: unknown): value is XboxConversation {
     &&optionalAvatar(value.avatarUrl)
     && typeof value.unread === 'boolean' && (value.lastMessage === null || message(value.lastMessage));
 }
-const cleanMessage = ({id,sender,timestamp,text,hidden,mine}: XboxMessage): XboxMessage => ({id,sender,timestamp,text,hidden,mine});
+const cleanMessage = ({id,sender,timestamp,text,hidden,mine}: XboxMessage): XboxMessage => ({id,sender,timestamp,text:hidden?'':text,hidden,mine});
 function cleanItems(kind: string,items: unknown[]): unknown[] {
   if(kind==='sent')return (items as XboxMessageReceipt[]).map(({id})=>({id}));
   if(kind==='profile')return (items as XboxPlayerProfile[]).map(({xuid,gamertag,gamerscore,avatarUrl})=>({xuid,gamertag,gamerscore,...picture(avatarUrl)}));
@@ -219,9 +219,15 @@ export class XboxSocial {
       const check = kind === 'friends' ? friend : kind === 'profile'?playerProfile:kind === 'inbox' ? conversation : kind === 'conversation' ? message : (item: unknown) => object(item) && string(item.id,256);
       if (value.items.length > (kind === 'friends' ? 2000 : 100) || !value.items.every(check)) throw Error('Xbox social response has an invalid format.');
       if(kind==='sent'&&(value.items.length!==1||!value.items[0].id.trim()||/[\x00-\x1f\x7f]/.test(value.items[0].id)))throw Error('Xbox did not confirm this message.');
+      if(kind==='conversation'){
+        const messages=value.items as XboxMessage[];
+        if(new Set(messages.map(message=>message.id)).size!==messages.length||messages.some(message=>message.timestamp===null||message.sender==='0'||(message.mine?message.sender===args[1]:message.sender!==args[1])))throw Error('Xbox returned a different conversation.');
+        messages.sort((a,b)=>Date.parse(a.timestamp!)-Date.parse(b.timestamp!));
+      }
       return cleanItems(kind,value.items);
     })().finally(() => this.controllers.delete(controller));
     if (input === undefined) {
+      while(this.reads.size>=128)this.reads.delete(this.reads.keys().next().value!);
       this.reads.set(key,{connection,expires:Date.now()+(kind==='conversation'?3_000:kind==='inbox'?15_000:30_000),promise});
       void promise.catch(() => {if (this.reads.get(key)?.promise === promise) this.reads.delete(key);});
     }

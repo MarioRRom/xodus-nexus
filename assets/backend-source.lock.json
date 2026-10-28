@@ -5,7 +5,7 @@
   "commit": "53ea781dcd073e31d7ea68e894134e9c959bff04",
   "rust": "1.99.0",
   "cargoLockSha256": "2259b343e00dadc263018beb7664b12e9d58a0b73bff502ad566f5f8619ce28a",
-  "patchId": "linux-run-v64",
+  "patchId": "linux-run-v65",
   "compatibility": "linux-run-v25",
   "patches": [
     {
@@ -255,6 +255,10 @@
     {
       "file": "xodus-native-social.patch",
       "sha256": "b58396239cf38ac724c721b5baf79d248eea79e38b8a7a6da7d9dcb744b7d4c2"
+    },
+    {
+      "file": "xodus-native-social-safety.patch",
+      "sha256": "3949ae461efad58d1281165d709a4f749c0cbafe23461efccb91bd9a51855683"
     }
   ]
 }

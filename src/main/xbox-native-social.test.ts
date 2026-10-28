@@ -4,6 +4,16 @@ import { XboxSocial } from './xbox-native-social.js';
 const person = {xuid:'1',gamertag:'Example',online:true,presence:'Playing E-Day',favorite:false,inParty:false};
 const response = (account = 'account',kind = 'friends',items: unknown[] = [person]) => JSON.stringify({schema:1,account,kind,items});
 describe('native Xbox social account boundary',() => {
+  it('rejects wrong-peer messages, duplicate IDs and invalid timestamps, and strips hidden text',async()=>{
+    const item={id:'a',sender:'2',mine:false,hidden:false,text:'Fixture',timestamp:'2026-10-28T00:00:00Z'};
+    const reader=vi.fn(async()=>response('account','conversation',[item]));
+    const api=new XboxSocial(()=>({binary:'cli',account:'account'}),reader);
+    for(const items of [[{...item,sender:'3'}],[item,item],[{...item,timestamp:'now'}],[{...item,mine:true}]]){
+      reader.mockResolvedValueOnce(response('account','conversation',items));await expect(api.conversation('2')).rejects.toThrow();api.clear();
+    }
+    reader.mockResolvedValueOnce(response('account','conversation',[{...item,hidden:true,text:'PRIVATE'}]));
+    expect((await api.conversation('2'))[0].text).toBe('');
+  });
   it('accepts Xbox-hosted gamerpics and rejects arbitrary remote or credential-bearing image URLs',async()=>{
     for(const avatarUrl of ['https://gamerpic.xboxlive.com/profile.png','https://images-eds-ssl.xboxlive.com/image?url=public']){
       const value={...person,avatarUrl};const api=new XboxSocial(()=>({binary:'xodus-cli',account:'account'}),async()=>response('account','friends',[value]));expect(await api.friends()).toEqual([value]);

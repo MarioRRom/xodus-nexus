@@ -6,6 +6,17 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
+test('native inbox is nonblocking and conversation validation retains account and safety gates (#408)',async()=>{
+ const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
+ const entry=lock.patches.find(p=>p.file==='xodus-native-social-safety.patch');assert.ok(entry);
+ const patch=await fs.readFile('assets/'+entry.file,'utf8');assert.equal(createHash('sha256').update(patch).digest('hex'),entry.sha256);
+ assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value=>value[1]),['crates/xodus-cli/src/commands/native_social.rs']);
+ for(const name of ['native_conversation_binds_both_users_network_and_unique_ordered_messages','native_message_filtering_fails_closed_and_does_not_truncate_identifiers','native_inbox_keeps_explicit_unread_state_and_rejects_cross_account_or_duplicate_rows'])assert.ok(patch.includes(name));
+ const added=patch.split('\n').filter(line=>line.startsWith('+')&&!line.startsWith('+++')).join('\n');
+ assert.match(added,/value\["networkId"\] != "Xbox"/);assert.match(added,/row\["isRead"\]\.as_bool\(\)/);
+ assert.doesNotMatch(added,/\.post\(|\.delete\(|cache_xsts|set_user|horizon|AuthKey/);
+ assert.ok(patch.includes('-            }).buffer_unordered(4).collect().await;'));
+});
 import { backendSourceArchiveArgs } from '../backend-source-archive.mjs';
 
 test('incremental updates retain verified reuse and a durable launch barrier until metadata commit (#405)', async () => {

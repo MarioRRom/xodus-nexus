@@ -23,6 +23,11 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
 afterEach(async()=>{resetSocialTransport();await fs.rm(root,{recursive:true,force:true});});
 const read=(args:string[],input?:string,signal=new AbortController().signal)=>readSocialBroker(binary,args,input,signal,()=>Error('Safe service failure'));
 const history=async()=> (await fs.readFile(events,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+it('prioritizes interactive chat over queued optional profiles without repeating a write',async()=>{
+ const first=read(['delayed']),profile=read(['profile','2']),conversation=read(['conversation','2']);
+ await Promise.all([first,profile,conversation]);
+ expect((await history()).filter(event=>event.event==='request').map(event=>event.operation)).toEqual(['delayed','conversation','profile']);
+});
 it('reuses one helper and preserves framed Unicode/newline input without putting the body in argv',async()=>{
  expect(await supportsSocialBroker(binary)).toBe(true);
  const input='A private test "+line\\n☃';const first=JSON.parse(await read(['party'],input));const second=JSON.parse(await read(['invites']));
