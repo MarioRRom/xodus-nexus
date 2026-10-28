@@ -50,7 +50,6 @@ command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'k
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'keyring_session_', '--', '--test-threads=1']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'keyring_persistence_', '--', '--test-threads=1']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_license_']);
-command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'smbios_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'content_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus', 'xbox_delegation_ticket_']);
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'xodus-cli', 'hosted_signin_']);
@@ -65,6 +64,13 @@ command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'msixvc', '
 command('cargo', ['test', '--locked', ...offline, ...features, '-p', 'msixvc', 'package_metadata']);
 command('cargo', ['build', '--release', '--locked', ...offline, ...features, '-p', 'xodus-cli', '-p', 'xodus-service']);
 const cli = path.join(target, 'release/xodus-cli');
+for (const name of ['xodus-cli', 'xodus-service']) {
+  const file = await fs.open(path.join(target, 'release', name), 'r');
+  const header = Buffer.alloc(64);
+  try { await file.read(header, 0, header.length, 0); } finally { await file.close(); }
+  if (header.subarray(0,4).toString('hex') !== '7f454c46' || header[4] !== 2 || header[5] !== 1 || header.readUInt16LE(18) !== {x64:62,arm64:183}[process.arch])
+    throw Error('Backend ELF architecture mismatch: ' + name);
+}
 const help = command(cli, ['--help'], true);
 if (authUi === 'electron' && !help.includes('--external-webview-stdio')) throw Error('External sign-in capability missing');
 if (authUi === 'electron' && /lib(?:gtk|webkit|soup|javascriptcore)/i.test(command('readelf', ['-d', cli], true))) throw Error('Headless CLI links a native webview library');

@@ -120,7 +120,7 @@ launch-chain tests and CLI capability checks, then packages:
 - matching `.manifest.json` (recipe/source identity and per-file hashes)
 - matching `-source.tar.xz` and SHA-512 (patched upstream, vendored dependencies,
   offline Cargo configuration, recipe, build instructions and retained licenses)
-- `candidate.json` binding all five assets to the Nexus commit and workflow run
+- `candidate.json` binding each architecture's five assets to the Nexus commit and workflow run
 
 Native build dependencies: Git, Rust from the lock, Node 22, Cargo, pkg-config,
 C/C++ toolchain, OpenSSL, protoc, CMake, D-Bus development headers,
@@ -148,10 +148,10 @@ the active pointer atomically only while idle; older builds remain available.
 An unavailable/private release, incompatible system libraries or failed checksum
 never causes automatic compilation or a production backend replacement.
 
-Default install needs no Git/Cargo/protoc/GitHub authentication. Linux x86_64,
+Default install needs no Git/Cargo/protoc/GitHub authentication. Linux x86_64 or aarch64,
 glibc compatible with Ubuntu 22.04, OpenSSL 3, D-Bus, tar/xz and the desktop's
-secret service are needed. Other architectures/musl and other distributions
-have not been validated. Missing-library failures are shown in Settings.
+secret service are needed. ARM64 support is experimental; musl builds are not
+provided. Missing-library failures are shown in Settings.
 
 Advanced / Diagnostics retains an explicit local build from the same source
 and patches, for developers only. It does not build the Wine runtime. No probe

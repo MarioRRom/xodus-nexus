@@ -343,12 +343,18 @@ export async function syncUnrealCultureGameIni(
  * Steam variables of that launch become the prefix's FEX app config. An
  * explicit FEX_APP_CONFIG (or FEX_DISKCACHE / FEX_APP_CONFIG_LOCATION) wins.
  */
-export function fexEnvironment(configFile: string, profiles: string | undefined): string[] {
+export function fexEnvironment(configFile: string): string[] {
+  const profiles = path.join(path.dirname(configFile), 'fex-emu');
   return [
     'if [ "$(uname -m)" = aarch64 ]; then',
     '  if [ "${FEX_DISKCACHE+x}" != x ]; then export FEX_DISKCACHE=1; fi',
-    ...(profiles ? ['  if [ "${FEX_APP_CONFIG_LOCATION+x}" != x ]; then', `    export FEX_APP_CONFIG_LOCATION=${shellQuote(profiles)}`, '  fi'] : []),
-    '  if [ -z "${FEX_APP_CONFIG:-}" ]; then',
+    '  if [ "${FEX_APP_CONFIG_LOCATION+x}" != x ]; then',
+    // FEX creates AppConfig here. Its global shipped profiles are still read
+    // from the runtime, but local state must never mutate that runtime.
+    `    mkdir -p ${shellQuote(path.join(profiles, 'AppConfig'))} || exit 1`,
+    `    export FEX_APP_CONFIG_LOCATION=${shellQuote(profiles + '/')}`,
+    '  fi',
+    '  if [ "${FEX_APP_CONFIG+x}" != x ]; then',
     '    fex_tso=; fex_multiblock=',
     '    case "${STEAM_FEX_TSOENABLED:-}" in 0|1) fex_tso=$STEAM_FEX_TSOENABLED;; esac',
     '    case "${STEAM_FEX_MULTIBLOCK:-}" in 0|1) fex_multiblock=$STEAM_FEX_MULTIBLOCK;; esac',
@@ -360,7 +366,8 @@ export function fexEnvironment(configFile: string, profiles: string | undefined)
     '    fex_config=',
     '    if [ -n "$fex_tso" ]; then fex_config="\\"TSOEnabled\\": \\"$fex_tso\\""; fi',
     '    if [ -n "$fex_multiblock" ]; then fex_config="${fex_config:+$fex_config, }\\"Multiblock\\": \\"$fex_multiblock\\""; fi',
-    `    printf '{\\n  "Config": {%s},\\n  "ThunksDB": {}\\n}\\n' "$fex_config" > ${shellQuote(configFile + '.tmp')} && mv -f ${shellQuote(configFile + '.tmp')} ${shellQuote(configFile)}`,
+    `    fex_tmp=$(mktemp ${shellQuote(configFile + '.tmp.XXXXXX')}) || exit 1`,
+    `    printf '{\\n  "Config": {%s},\\n  "ThunksDB": {}\\n}\\n' "$fex_config" > "$fex_tmp" && mv -f "$fex_tmp" ${shellQuote(configFile)} || { rm -f "$fex_tmp"; exit 1; }`,
     `    export FEX_APP_CONFIG=${shellQuote(configFile)}`,
     '  fi',
     'fi',
@@ -479,7 +486,6 @@ export async function prepareProtonRunner(
   const eacRuntime = await installedEacRuntime(steamRoot);
   // Keep the caches outside temporary launch views, separately for each prefix.
   const shaderCaches = await prepareShaderCache(compatibilityDataPath);
-  const fexProfiles = await fs.access(path.join(files, 'share', 'fex-emu')).then(() => path.join(files, 'share', 'fex-emu') + '/', () => undefined);
   const defaultEnvironment = (name: string, value: string) => [
     `if [ "\${${name}+x}" != x ]; then`,
     `  export ${name}=${shellQuote(value)}`,
@@ -530,7 +536,7 @@ export async function prepareProtonRunner(
     'if [ "${1:-}" = "--nexus-stop-prefix" ]; then',
     `  exec ${shellQuote(wineserver)} -k`,
     'fi',
-    ...fexEnvironment(path.join(compatibilityDataPath, 'proton-fex-config.json'), fexProfiles),
+    ...fexEnvironment(path.join(compatibilityDataPath, 'proton-fex-config.json')),
     // Launchers (including EAC) may finish before the game they spawned.
     // Keep Xodus and its temporary launch view/account service alive until
     // the isolated game prefix has no remaining Wine processes.

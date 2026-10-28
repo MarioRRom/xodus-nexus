@@ -1054,5 +1054,7 @@
   "game.view_details": "View details for {{game}}",
   "game.back_to_store": "Back to Store",
   "game.details_unavailable": "Game information could not be loaded. Try again later.",
-  "social.guide_game_monitor_unavailable": "Nexus Guide could not locate the game window on a supported display. Keep the game open and try again."
+  "social.guide_game_monitor_unavailable": "Nexus Guide could not locate the game window on a supported display. Keep the game open and try again.",
+  "runtime.missing_native_arm_loader": "The ARM64 runtime has no executable native loader.",
+  "runtime.unsupported_host": "Xodus Nexus does not support {{arch}} hosts."
 }

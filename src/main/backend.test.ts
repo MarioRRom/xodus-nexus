@@ -247,7 +247,29 @@ describe('prebuilt backend', () => {
   it('rejects foreign asset URLs rather than downloading executable code from them', async () => {
     const fetcher = (async () => new Response(JSON.stringify([{ tag_name: tag, assets: [
       { name: `${backendPackageName(backendLock.version)}.manifest.json`, browser_download_url: 'https://other.example/manifest' },
+      ...['.tar.xz', '.sha512sum', '-source.tar.xz', '-source.sha512sum'].map(suffix => ({ name: backendPackageName(backendLock.version) + suffix, browser_download_url: 'https://other.example/file' })),
     ] }]))) as typeof fetch;
     await expect(discoverBackend(fetcher)).rejects.toThrow('Unexpected');
+  });
+
+  it.each(['x64', 'arm64'] as const)('discovers only complete %s releases even when a newer release ships the other architecture', async arch => {
+    const requests: string[] = [];
+    const version = '9.8.0', expectedTag = 'backend-v' + version;
+    const name = backendPackageName(version, arch);
+    const sum = 'c'.repeat(128);
+    const release = (v: string, a: 'x64' | 'arm64', complete = true) => ({ tag_name: 'backend-v' + v,
+      assets: ['.tar.xz', '.manifest.json', '.sha512sum', '-source.tar.xz', ...(complete ? ['-source.sha512sum'] : [])].map(suffix => ({
+        name: backendPackageName(v, a) + suffix,
+        browser_download_url: `https://github.com/domsvoboda/xodus-nexus/releases/download/backend-v${v}/${backendPackageName(v, a)}${suffix}`,
+      })) });
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = String(input); requests.push(url);
+      if (url.includes('/releases?')) return new Response(JSON.stringify([release('9.9.9', arch === 'arm64' ? 'x64' : 'arm64'), release('9.9.8', arch, false), release(version, arch)]));
+      if (url.endsWith('.manifest.json')) return new Response(JSON.stringify({ schema: 1, authUi: 'electron', version, commit: 'a'.repeat(40), recipeSha256: 'b'.repeat(64), compatibility: 'linux-run-fixture', platform: 'linux', arch,
+        archive: name + '.tar.xz', archiveSha512: sum, files: { 'xodus-cli': 'd'.repeat(64), 'xodus-service': 'e'.repeat(64), LICENSE: 'f'.repeat(64) } }));
+      return new Response(`${sum}  ${name}.tar.xz\n`);
+    }) as typeof fetch;
+    expect((await discoverBackend(fetcher, arch)).tag).toBe(expectedTag);
+    expect(requests.slice(1).every(url => url.includes(expectedTag + '/' + name))).toBe(true);
   });
 });

@@ -13,8 +13,10 @@ export function nexusArch(arch: string = process.arch): NexusArch | undefined {
 }
 
 /** The architecture this launcher process runs as; its downloads must match it. */
-export function currentArch(): NexusArch {
-  return nexusArch() ?? 'x64';
+export function currentArch(arch: string = process.arch): NexusArch {
+  const supported = nexusArch(arch);
+  if (!supported) throw new Error(`Xodus Nexus does not support ${arch} hosts.`);
+  return supported;
 }
 
 /** True when `header` begins a 64-bit little-endian ELF for `arch`. */
