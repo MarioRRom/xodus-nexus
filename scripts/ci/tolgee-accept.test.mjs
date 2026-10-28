@@ -12,7 +12,8 @@ const cell = () => ({ id: 20, text: null, state: 'UNTRANSLATED', outdated: false
   activeSuggestionCount: 1, suggestions: [suggestion()] });
 const row = () => ({ keyId: 10, keyName: 'common.cancel_game', keyIsPlural: false, keyNamespace: null, branch: 'main',
   translations: { en: { text: 'Cancel {game}?' }, fr: cell(), es: { ...cell(), activeSuggestionCount: 0, suggestions: [] } } });
-const page = (collection, rows, number = 0, totalPages = 1) => ({ _embedded: { [collection]: rows }, page: { number, totalPages, totalElements: rows.length } });
+const page = (collection, rows, number = 0, totalPages = 1) => ({ _embedded: { [collection]: rows }, page: { number, totalPages, totalElements: rows.length },
+  ...(collection === 'keys' ? { selectedLanguages: languages.map(({ tag }) => ({ tag })) } : {}) });
 const clone = value => structuredClone(value);
 
 function fixture(options = {}) {
@@ -25,7 +26,7 @@ function fixture(options = {}) {
     if (url.pathname === `${stem}/translations`) {
       viewReads++;
       options.beforeView?.(current, viewReads);
-      return page('keys', [clone(current)]);
+      return { ...page('keys', [clone(current)]), ...(options.viewLanguages ? { selectedLanguages: options.viewLanguages.map(tag => ({ tag })) } : {}) };
     }
     if (url.pathname === `${stem}/languages/2/key/10/suggestion`) {
       throw Error('Separate suggestion listing requires unnecessary suggest/manage permissions.');
@@ -136,6 +137,16 @@ test('preview is read-only and report excludes texts, contributor data and ident
   assert.deepEqual(report.entries, [{ key: 'common.cancel_game', language: 'fr', status: 'eligible' }]);
   assert.ok(calls.every(call => call.method === 'GET'));
   assert.doesNotMatch(JSON.stringify(report), /Annuler|languageId|keyId|author|translation:/);
+});
+
+test('report actual language coverage and refuse partial acceptance when the API omits a requested language', async () => {
+  const preview = fixture({ viewLanguages: ['en', 'fr'] });
+  const report = await acceptSuggestions({ api: preview.api, english });
+  assert.deepEqual(report.returnedLanguages, ['en', 'fr']);
+  assert.deepEqual(report.unavailableLanguages, ['es']);
+  const actual = fixture({ viewLanguages: ['en', 'fr'] });
+  await assert.rejects(acceptSuggestions({ api: actual.api, english, apply: true }), /omitted requested languages/);
+  assert.ok(actual.calls.every(call => call.method === 'GET'));
 });
 
 test('accept rechecks state and single active view candidate using minimal scopes, retaining authorship', async () => {
