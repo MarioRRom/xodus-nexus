@@ -29,14 +29,14 @@ export class XboxGuideServer {
   private timer?:ReturnType<typeof setInterval>;
   constructor(private readonly options:Options){}
   async start():Promise<string>{
-    if(this.server)throw Error('Nexus Guide is already running.');
-    this.bound=this.options.account();if(!this.bound)throw Error('Sign in to Nexus to open Nexus Guide.');
+    if(this.server)throw Error('Nexus Overlay is already running.');
+    this.bound=this.options.account();if(!this.bound)throw Error('Sign in to Nexus to open Nexus Overlay.');
     const server=createServer((request,response)=>{void (async()=>{
       response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');response.setHeader('Referrer-Policy','no-referrer');
       if(request.headers.host!==this.origin.slice(7))return fail(response,403,'Invalid Guide host.');
       const route=request.url??'';
       if(route==='/rpc'||route==='/events'){
-        if(!this.bound||this.options.account()!==this.bound)return fail(response,401,'Xbox account changed. Reopen the Guide.');
+        if(!this.bound||this.options.account()!==this.bound)return fail(response,401,'Xbox account changed. Reopen the Overlay.');
         const auth=request.headers.authorization??'',expected=`Bearer ${this.token}`;
         if(Buffer.byteLength(auth)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(auth),Buffer.from(expected)))return fail(response,403,'Invalid Guide session.');
         if(request.headers.origin!==undefined&&request.headers.origin!==this.origin)return fail(response,403,'Invalid Guide origin.');
@@ -62,7 +62,7 @@ export class XboxGuideServer {
           const result=await this.options.invoke(method,args);
           if(!this.bound||this.options.account()!==this.bound)return fail(response,401,'Xbox account changed.');
           response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({result:result??null}));
-        }catch(error){fail(response,400,error instanceof Error?error.message:'Nexus Guide request failed.');}
+        }catch(error){fail(response,400,error instanceof Error?error.message:'Nexus Overlay request failed.');}
         finally{this.inflight--;}
         return;
       }
@@ -72,10 +72,10 @@ export class XboxGuideServer {
       const type=media[path.extname(filename)];if(!type)return fail(response,404,'Not found.');
       const bytes=await fs.readFile(filename).catch(()=>undefined);if(!bytes)return fail(response,404,'Not found.');
       response.writeHead(200,{'Content-Type':type,'Content-Security-Policy':"default-src 'self'; base-uri 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'none'; img-src 'self' data: https://store-images.s-microsoft.com https://images-assets-ssl.xboxlive.com https://images-eds-ssl.xboxlive.com https://gamerpic.xboxlive.com https://avatar-ssl.xboxlive.com https://xboxavatargamerpic.azureedge.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'none'; object-src 'none'"});response.end(bytes);
-    })().catch(()=>{if(!response.headersSent)fail(response,500,'Nexus Guide unavailable.');else response.end();});});
+    })().catch(()=>{if(!response.headersSent)fail(response,500,'Nexus Overlay unavailable.');else response.end();});});
     this.server=server;server.requestTimeout=15_000;server.headersTimeout=10_000;server.maxConnections=16;server.on('clientError',(_error,socket)=>socket.destroy());
     await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>{server.removeListener('error',reject);resolve();});});
-    const address=server.address();if(!address||typeof address==='string')throw Error('Nexus Guide address unavailable.');
+    const address=server.address();if(!address||typeof address==='string')throw Error('Nexus Overlay address unavailable.');
     this.origin=`http://127.0.0.1:${address.port}`;
     this.timer=setInterval(()=>{if(this.options.account()!==this.bound){void this.stop();return;}for(const client of this.clients)this.write(client,': keepalive\n\n');},20_000);this.timer.unref();
     return `${this.origin}/overlay.html`;
