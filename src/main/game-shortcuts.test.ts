@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
-import { GameShortcuts, desktopArgument, shortcutArguments, shortcutInstanceData, shortcutInstanceRequest, shortcutTitleStem } from './game-shortcuts.js';
+import { GameShortcuts, shortcutLauncherPath, desktopArgument, shortcutArguments, shortcutInstanceData, shortcutInstanceRequest, shortcutTitleStem } from './game-shortcuts.js';
 import { ShortcutLaunch } from './shortcut-launch.js';
 
 const execute = promisify(execFile);
@@ -251,4 +251,19 @@ it('coalesces duplicate requests, refuses concurrent games, and recovers after s
   const failure = new ShortcutLaunch(() => undefined, async () => { throw Error('missing runtime'); });
   await expect(failure.request(id)).rejects.toThrow('missing runtime');
   expect(failure.preparing).toBe(false);
+});
+
+it('follows the stable launcher symlink after an update instead of pinning its resolved version',async()=>{
+  const f=await fixture();
+  try{
+    const stable=path.join(f.root,'Xodus-Nexus.AppImage');await fs.symlink(f.locations.launcher,stable);
+    expect(await shortcutLauncherPath(f.locations.launcher)).toBe(stable);
+    const shortcuts=new GameShortcuts({...f.locations,launcher:stable});await shortcuts.initialize();
+    const helper=path.join(f.locations.userData,'shortcuts/launch-game');
+    expect((await execute('/bin/sh',[helper,id])).stdout).toContain('--launch-game '+id);
+    const updated=path.join(f.root,'updated');await fs.writeFile(updated,'#!/bin/sh\nprintf updated\n',{mode:0o700});
+    await fs.unlink(stable);await fs.symlink(updated,stable);
+    expect((await execute('/bin/sh',[helper,id])).stdout).toBe('updated');
+    expect(await shortcutLauncherPath(f.locations.launcher,updated)).toBe(f.locations.launcher);
+  }finally{await fs.rm(f.root,{recursive:true,force:true});}
 });

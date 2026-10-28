@@ -67,6 +67,15 @@ export function shortcutInstanceRequest(data: unknown, currentProfile: string): 
 }
 
 interface Locations { userData: string; desktop: string; applications: string; launcher?: string; icon: string }
+export async function shortcutLauncherPath(appImage:string,argv0?:string):Promise<string>{
+  const resolved=await fs.realpath(appImage);
+  const stable=path.join(path.dirname(appImage),'Xodus-Nexus.AppImage');
+  try{if((await fs.lstat(stable)).isSymbolicLink()&&await fs.realpath(stable)===resolved)return stable;}catch{}
+  if(argv0&&path.isAbsolute(argv0)&&!/[\0\r\n]/.test(argv0)){
+    try{if(await fs.realpath(argv0)===resolved)return argv0;}catch{}
+  }
+  return appImage;
+}
 export class GameShortcuts {
   private entry?: string;
   private icon?: string;
@@ -102,7 +111,7 @@ export class GameShortcuts {
   }
   async initialize(): Promise<void> {
     if (!this.locations.launcher) return;
-    const launcher = await fs.realpath(this.locations.launcher);
+    const launcher = this.locations.launcher;
     if (/[\0\r\n]/.test(launcher) || !path.isAbsolute(launcher) || !(await fs.stat(launcher)).isFile()) throw new Error('Invalid launcher executable.');
     await fs.access(launcher, constants.X_OK);
     const directory = path.join(this.locations.userData, 'shortcuts');
