@@ -10,7 +10,7 @@ const page = (name, values) => ({ _embedded: { [name]: values }, page: { number:
 function fixture(change) {
   const row = { keyId: 10, keyName: 'hello', keyNamespace: null, keyIsPlural: false, branch: 'main', translations: {
     en: { text: 'Hello {name}' }, fr: { id: 20, text: null, state: 'UNTRANSLATED', outdated: false, unresolvedCommentCount: 0, qaIssueCount: 0,
-      suggestions: [{ id: 30, keyId: 10, languageId: 2, state: 'ACTIVE', translation: 'Bonjor {name}', isPlural: false }] } } };
+      suggestions: [{ id: 30, state: 'ACTIVE', translation: 'Bonjor {name}', isPlural: false }] } } };
   const calls = []; let views = 0;
   const api = async (route, method = 'GET', body) => {
     calls.push({ route, method, body });
@@ -18,7 +18,8 @@ function fixture(change) {
     if (route.includes('/translations?')) { views++; change?.(row, views); return page('keys', [clone(row)]); }
     if (route.includes('/suggestion/30/accept?declineOther=false')) {
       row.translations.fr.text = 'Bonjor {name}'; row.translations.fr.state = 'TRANSLATED';
-      return { accepted: { ...row.translations.fr.suggestions[0], state: 'ACCEPTED' }, declined: [] };
+      row.translations.fr.id = 20;
+      return { accepted: { ...row.translations.fr.suggestions[0], keyId: 10, languageId: 2, state: 'ACCEPTED' }, declined: [] };
     }
     if (route === '/v2/projects/36162/translations' && method === 'PUT') {
       assert.deepEqual(body, { key: 'hello', namespace: null, branch: 'main', translations: { fr: 'Bonjour {name}' } });
@@ -50,6 +51,15 @@ test('preview and changed digest never mutate translations', async () => {
   assert.ok(f.calls.every(call => call.method === 'GET'));
 });
 
+test('official simple view model permits an absent untranslated cell ID but receipts still require full identity', async () => {
+  const f = fixture(), selected = plan(); f.row.translations.fr.id = null;
+  assert.equal((await reviewPlan({ api: f.api, english, plan: selected, digest: planDigest(selected), apply: true })).reviewed, 1);
+  const bad = fixture();
+  const api = async (...args) => { const result = await bad.api(...args); if (result.accepted) delete result.accepted.keyId; return result; };
+  await assert.rejects(reviewPlan({ api, english, plan: selected, digest: planDigest(selected), apply: true }), /receipt/);
+  assert.equal(bad.row.translations.fr.state, 'TRANSLATED');
+});
+
 test('source, parameters, protected names, whitespace, duplicate keys and English targets remain guarded', () => {
   for (const change of [p => { p[0].source = 'Other'; }, p => { p[0].language = 'en'; }, p => { p[0].translation = 'Bonjour'; },
     p => { p[0].translation = ' Bonjour {{name}}'; }, p => { p.push(clone(p[0])); }, p => { p[0].translation = '<b>{{name}}</b>'; }]) {
@@ -63,7 +73,8 @@ test('source, parameters, protected names, whitespace, duplicate keys and Englis
 test('changed source, flags, comments, plurals, current values and candidate identity fail before writes', async () => {
   for (const mutate of [r => { r.translations.en.text = 'Other {name}'; }, r => { r.translations.fr.outdated = true; },
     r => { r.translations.fr.unresolvedCommentCount = 1; }, r => { r.translations.fr.qaIssueCount = 1; }, r => { r.keyIsPlural = true; },
-    r => { r.translations.fr.text = 'Already edited'; }, r => { r.translations.fr.suggestions[0].id = -1; }]) {
+    r => { r.translations.fr.text = 'Already edited'; }, r => { r.translations.fr.suggestions[0].id = -1; },
+    r => { r.translations.fr.suggestions[0].keyId = 99; }, r => { r.translations.fr.suggestions[0].languageId = 99; }]) {
     const f = fixture((row, views) => { if (views === 2) mutate(row); }), selected = plan();
     await assert.rejects(reviewPlan({ api: f.api, english, plan: selected, digest: planDigest(selected), apply: true }));
     assert.ok(f.calls.every(call => call.method === 'GET'));

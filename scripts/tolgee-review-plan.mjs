@@ -34,11 +34,16 @@ export function validatePlan(plan, english) {
 function selection(row, language, entry) {
   const cell = row?.translations?.[entry.language];
   if (!positive(row?.keyId) || row.keyName !== entry.key || row.keyNamespace || row.branch != null && row.branch !== 'main' ||
-      row.keyIsPlural !== false || fromTolgee(row.translations?.en?.text) !== entry.source || !positive(cell?.id) ||
+      row.keyIsPlural !== false || fromTolgee(row.translations?.en?.text) !== entry.source || !cell ||
+      cell.id != null && !positive(cell.id) || cell.state !== 'UNTRANSLATED' && !positive(cell.id) ||
       cell.unresolvedCommentCount !== 0 || (cell.qaIssueCount ?? 0) !== 0 || cell.outdated !== false ||
       cell.text !== entry.previous || cell.state !== entry.previousState) throw Error(`Selection changed or needs discussion: ${entry.language}:${entry.key}`);
   const matches = cell.suggestions?.filter(value => value.state === 'ACTIVE' && value.translation === entry.suggestion && value.isPlural === false);
-  if (matches?.length !== 1 || !positive(matches[0].id) || matches[0].languageId !== language.id || matches[0].keyId !== row.keyId) throw Error('Selected suggestion is missing or ambiguous.');
+  // TranslationView embeds TranslationSuggestionSimpleModel: parent key/language
+  // provide its context. The accept receipt is the full model and must prove IDs.
+  if (matches?.length !== 1 || !positive(matches[0].id) ||
+      matches[0].languageId !== undefined && matches[0].languageId !== language.id ||
+      matches[0].keyId !== undefined && matches[0].keyId !== row.keyId) throw Error(`Selected suggestion is missing or ambiguous: ${entry.language}:${entry.key}`);
   return matches[0];
 }
 
