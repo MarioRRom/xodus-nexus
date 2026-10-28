@@ -5,7 +5,9 @@ import {
   LoaderCircle, LogIn, MoreHorizontal, PackageCheck, Pause, Play, Plus, RefreshCw, Rocket, Search, Settings2,
   Store, Terminal, Trash2, UsersRound, X,
 } from 'lucide-react';
-import type { AccountLibraryPage, AppSnapshot, CatalogProduct, CatalogSearchResult, DiagnosticLog, Game, GameContentPlan, GameLaunchOptions, Page, Settings } from '../shared/types';
+import type { AccountLibraryPage, AppSnapshot, CatalogProduct, CatalogSearchResult, DiagnosticLog, Game, GameContentPlan, GameLaunchOptions, Page, Settings, XboxProfileRequest } from '../shared/types';
+import { XboxSocial } from './XboxSocial';
+import './xbox-desktop-social.css';
 import { estimateTimeRemaining } from '../shared/utils';
 import { nexusRuntimeUpdateAvailable, runtimeDisplay } from '../shared/runtime-display';
 import { subscriptionBadge } from '../shared/subscription';
@@ -23,7 +25,7 @@ import { GameLanguage } from './GameLanguage';
 import { DownloadCancelDialog } from './DownloadCancelDialog';
 import { KeyringSetup } from './KeyringSetup';
 import { DiagnosticReportButton } from './DiagnosticReport';
-import { Friends, preloadFriends } from './Friends';
+
 import { ui, uiText, i18n, interfaceLanguages, useInterfaceLanguage } from './i18n';
 import { localizedTimeRemaining } from './localized-time';
 import type { DownloadCancelOptions } from '../shared/types';
@@ -68,7 +70,7 @@ export function GameTitle({ title }: { title: string }) {
 function NavItem({ active, icon, label, badge, onClick, autoSelect = false }: {
   active: boolean; icon: React.ReactNode; label: string; badge?: number; onClick: () => void; autoSelect?: boolean;
 }) {
-  return <button className={`nav-item ${active ? 'active' : ''}`} data-gamepad-auto-select={autoSelect ? '' : undefined} onClick={onClick}>
+  return <button className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined} data-gamepad-auto-select={autoSelect ? '' : undefined} onClick={onClick}>
     {icon}<span>{label}</span>{badge ? <b>{badge}</b> : null}
   </button>;
 }
@@ -879,7 +881,7 @@ export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value
   return <main className="page settings-page">
     <header className="page-header"><div><h1>{ui("ui.settings_74a883a")}</h1><p>{ui("ui.account_backend_runtime_and_storage_11bda06")}</p></div></header>
 
-    <section className="settings-card compact">
+    <section className="settings-card compact settings-language">
       <label>{ui('settings.interface_language')}<select value={form.interfaceLanguage ?? 'system'} onChange={event => setForm({ ...form, interfaceLanguage: event.target.value })}>
         <option value="system">{ui('settings.system_language')}</option>
         {interfaceLanguages.map(language => <option key={language} value={language}>{new Intl.DisplayNames([language], { type: 'language' }).of(language) ?? language}</option>)}
@@ -1056,16 +1058,34 @@ export default function App() {
   const [toast, setToast] = useState<Toast>();
   const [search, setSearch] = useState('');
   const [submittedSearch, setSubmittedSearch] = useState('');
+  const [socialOpen,setSocialOpen]=useState(false),[socialMounted,setSocialMounted]=useState(false);
+  const [desktopProfile,setDesktopProfile]=useState<XboxProfileRequest>();
   // App stays mounted while pages change, unlike LibraryPage/AccountGames.
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(() => loadLibraryFilters());
   const [librarySelection, setLibrarySelection] = useState<{ id: string }>();
-  const [friendsOpen,setFriendsOpen]=useState(false);
-  useEffect(() => window.launcher.onOpenFriends(() => setFriendsOpen(true)), []);
+  useEffect(() => window.launcher.onOpenFriends(() => {setSocialMounted(true);setSocialOpen(true);}), []);
 
   useEffect(() => {
     void window.launcher.getSnapshot().then((value) => { setData(value); setLoading(false); }).catch((error) => { setToast({ kind: 'error', message: errorMessage(error) }); setLoading(false); });
     return window.launcher.onSnapshot(setData);
   }, []);
+  useEffect(()=>{
+    if(window.location.hash==='#social-desktop')return;
+    let alive=true,received=false;
+    const accept=(request:XboxProfileRequest|undefined)=>{if(!alive)return;setDesktopProfile(request);if(request){setPage('social');setSocialOpen(false);}};
+    const unsubscribe=window.launcher.onXboxDesktopProfile(request=>{received=true;accept(request);});
+    void window.launcher.getXboxDesktopProfile().then(request=>{if(!received)accept(request);}).catch(()=>{});
+    return()=>{alive=false;unsubscribe();};
+  },[]);
+  useEffect(()=>{
+    if(!socialOpen)return;
+    const close=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setSocialOpen(false);}};
+    document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);
+  },[socialOpen]);
+  function go(next:Page){
+    if(next==='social'){setSocialMounted(true);setSocialOpen(open=>!open);return;}
+    setSocialOpen(false);setPage(next);
+  }
   useEffect(() => { if (!toast) return; const timeout = window.setTimeout(() => setToast(undefined), 5000); return () => window.clearTimeout(timeout); }, [toast]);
   useEffect(() => {
     // XODUS_DEMO_TOUR=1 cycles through the pages for screenshot capture.
@@ -1087,7 +1107,7 @@ export default function App() {
     setLibrarySelection({ id });
     setSearch('');
     changeLibraryFilters({ ...defaultLibraryFilters, playState: 'installed' });
-    setPage('library');
+    setSocialOpen(false);setPage('library');
   }
 
   function action(fn: () => Promise<unknown>, success?: string) { void fn().then(() => success && setToast({ kind: 'success', message: success })).catch((error) => setToast({ kind: 'error', message: errorMessage(error) })); }
@@ -1095,20 +1115,22 @@ export default function App() {
   if (loading) return <div className="boot"><div className="brand-mark">X</div><LoaderCircle className="spin" /><span>{ui("ui.loading_xodus_nexus_2e92cfd")}</span></div>;
   return <ConfirmationProvider><PackageInstallProvider><div className="app-shell">
     {!data.settings.firstRunCompleted ? <FirstRunWizard data={data} toast={(value) => setToast(value)} /> : null}
-    <Sidebar data={data} page={page} go={setPage} openGame={openLibraryGame} />
+    <Sidebar data={data} page={page} go={go} openGame={openLibraryGame} />
 
     <section className="content-shell">
-      <header className="topbar"><GlobalSearch games={data.games} page={page} query={search} change={setSearch} submit={value => { setSubmittedSearch(value); setPage('store'); }} select={openLibraryGame} /><TopStatus data={data} go={setPage} openFriends={()=>setFriendsOpen(true)} /></header>
-      <div className="page-scroll">{page === 'home' ? <HomePage data={data} go={setPage} action={action} /> : null}{page === 'store' ? <StorePage data={data} toast={setToast} go={setPage} initialQuery={submittedSearch} /> : null}{page === 'library' ? <LibraryPage data={data} toast={setToast} filters={libraryFilters} onFiltersChange={changeLibraryFilters} selection={librarySelection} /> : null}{page === 'downloads' ? <DownloadsPage data={data} toast={setToast} /> : null}{page === 'settings' ? <SettingsPage data={data} toast={setToast} /> : null}</div>
+      <header className="topbar"><GlobalSearch games={data.games} page={page} query={search} change={setSearch} submit={value => { setSubmittedSearch(value); go('store'); }} select={openLibraryGame} /><TopStatus data={data} go={go} /></header>
+      <div className={'page-scroll'+(page==='social'?' social-full-page':'')}>{page === 'home' ? <HomePage data={data} go={go} action={action} /> : null}{page === 'store' ? <StorePage data={data} toast={setToast} go={go} initialQuery={submittedSearch} /> : null}{page === 'library' ? <LibraryPage data={data} toast={setToast} filters={libraryFilters} onFiltersChange={changeLibraryFilters} selection={librarySelection} /> : null}{page === 'downloads' ? <DownloadsPage data={data} toast={setToast} /> : null}{page === 'settings' ? <SettingsPage data={data} toast={setToast} /> : null}{page === 'social' ? <div className="nexus-social-page"><XboxSocial key={data.auth.username} auth={data.auth} api={window.launcher.nativeSocial} runtimeInvites={data.social} runtimeApi={window.launcher} expanded showProfile={desktopProfile}/></div> : null}</div>
+      {socialOpen?<button className="nexus-social-scrim" aria-label={ui("social.close_social_shelf_09c6eb")} onClick={()=>setSocialOpen(false)}/>:null}
+      <aside id="nexus-social-shelf" className={'nexus-social-shelf'+(socialOpen?' is-open':'')} aria-label={ui("social.xbox_social_shelf_bb6aaf")} aria-hidden={!socialOpen}
+        ref={element=>{if(element)element.inert=!socialOpen;}}>
+        {socialMounted?<XboxSocial key={data.auth.username} auth={data.auth} api={window.launcher.nativeSocial} runtimeInvites={data.social} runtimeApi={window.launcher} shelf close={()=>setSocialOpen(false)}/>:null}
+      </aside>
     </section>
+    <button className={'nexus-social-toggle'+(socialOpen?' is-open':'')} aria-label={ui("social.xbox_social_9dd063")} aria-expanded={socialOpen} aria-controls="nexus-social-shelf" onClick={()=>go('social')}><UsersRound/><span>{ui("social.social_f1b750")}</span><ChevronRight/></button>
     {toast ? <div className={`toast ${toast.kind}`}>{toast.kind === 'success' ? <Check /> : toast.kind === 'error' ? <CircleAlert /> : <Terminal />}<span>{uiText(toast.message)}</span><button onClick={() => setToast(undefined)}><X /></button></div> : null}
-    <div className="friends-dock">
-      {friendsOpen?<Friends key={JSON.stringify([data.auth.username,data.backend.binaryPath])} data={data} close={()=>setFriendsOpen(false)} docked />:null}
-      <button className="friends-dock-toggle" aria-label={ui("ui.xbox_friends_and_chat_84d8cb6")} aria-expanded={friendsOpen} onPointerEnter={()=>{if(!friendsOpen)preloadFriends(data);}} onFocus={()=>{if(!friendsOpen)preloadFriends(data);}} onClick={()=>setFriendsOpen(value=>!value)}><UsersRound /><span><strong>{ui("ui.friends_bd104d1")}</strong><small>{data.social?.incoming.length?ui('friends.invitation_count', { count: data.social.incoming.length }):ui("ui.chat_and_game_invitations_b3e2f0e")}</small></span><ChevronRight className={friendsOpen?'expanded':''} /></button>
-    </div>
-  </div><GamepadNavigation back={() => friendsOpen?setFriendsOpen(false):setPage('home')} page={delta => { if(friendsOpen)return;setPage(current => {
+  </div><GamepadNavigation back={() => setPage('home')} page={delta => setPage(current => {
     const pages: Page[] = ['home', 'library', 'store'];
     const index = pages.indexOf(current);
     return index === -1 ? pages[delta > 0 ? 0 : pages.length - 1] : pages[(index + delta + pages.length) % pages.length];
-  });}} /></PackageInstallProvider></ConfirmationProvider>;
+  })} /></PackageInstallProvider></ConfirmationProvider>;
 }

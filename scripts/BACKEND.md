@@ -227,3 +227,12 @@ still receive the existing truncated-ciphertext repair check.
 and corrupt pages, partial staged resumes, licensed plaintext/ciphertext checks,
 wrong keys, space accounting, safe replacement, plus existing HTTP/pause/resume
 and failure handling. Tests use synthetic fixtures and loopback HTTP only.
+
+## Native social API
+
+The optional `native-social` command provides the account-bound people, profile,
+conversation and relationship services alongside the existing `social --json`
+interface. Explicit writes use the signed session and are never silently retried.
+The launcher exposes these operations through a separate `nativeSocial` IPC API.
+Window, party and overlay features register their own authorized senders and lifecycle
+callbacks; the API foundation performs no automatic writes.
