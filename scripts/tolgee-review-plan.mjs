@@ -22,6 +22,8 @@ export function validatePlan(plan, english) {
         !Object.hasOwn(english, key) || source !== english[key] || seen.has(`${language}:${key}`)) throw Error('Invalid language, source or duplicate selection.');
     if (typeof suggestion !== 'string' || !suggestion.length || suggestion.length > 12000 ||
         previous !== null && typeof previous !== 'string' || !['UNTRANSLATED', 'TRANSLATED', 'REVIEWED'].includes(previousState)) throw Error('Invalid selection snapshot.');
+    if (entry.existing !== undefined && entry.existing !== true || entry.existing &&
+        (previousState === 'UNTRANSLATED' || previous !== suggestion)) throw Error('Existing translation review requires an exact nonempty snapshot.');
     parseCatalog(JSON.stringify({ [key]: translation }), english);
     if (!same(tokens(source), tokens(translation)) || translation.normalize('NFC') !== translation ||
         /[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u.test(translation)) throw Error('Unsafe reviewed translation.');
@@ -38,6 +40,7 @@ function selection(row, language, entry) {
       cell.id != null && !positive(cell.id) || cell.state !== 'UNTRANSLATED' && !positive(cell.id) ||
       cell.unresolvedCommentCount !== 0 || (cell.qaIssueCount ?? 0) !== 0 || cell.outdated !== false ||
       cell.text !== entry.previous || cell.state !== entry.previousState) throw Error(`Selection changed or needs discussion: ${entry.language}:${entry.key}`);
+  if (entry.existing) return undefined;
   const matches = cell.suggestions?.filter(value => value.state === 'ACTIVE' && value.translation === entry.suggestion && value.isPlural === false);
   // TranslationView embeds TranslationSuggestionSimpleModel: parent key/language
   // provide its context. The accept receipt is the full model and must prove IDs.
@@ -71,19 +74,23 @@ export async function reviewPlan({ api, english, plan, digest, apply = false, re
     for (const item of batch) {
       const current = fresh.find(value => value.keyId === item.row.keyId);
       const next = selection(current, item.language, item.entry);
-      if (next.id !== item.suggestion.id) throw Error('Selected suggestion changed.');
+      if (next?.id !== item.suggestion?.id) throw Error('Selected suggestion changed.');
     }
     for (const { entry, language, row, suggestion } of batch) {
       const result = { language: entry.language, key: entry.key, status: 'selected' }; report.entries.push(result);
       if (!apply) continue;
-      result.status = 'accept-outcome-unknown';
-      const receipt = await api(`${project}/languages/${language.id}/key/${row.keyId}/suggestion/${suggestion.id}/accept?declineOther=false`, 'PUT');
-      if (receipt.accepted?.id !== suggestion.id || receipt.accepted.languageId !== language.id || receipt.accepted.keyId !== row.keyId ||
-          receipt.accepted.state !== 'ACCEPTED' || receipt.accepted.translation !== entry.suggestion || !same(receipt.declined, [])) throw Error('Unexpected acceptance receipt. No retries.');
-      report.accepted++; result.status = 'accepted';
+      if (!entry.existing) {
+        result.status = 'accept-outcome-unknown';
+        const receipt = await api(`${project}/languages/${language.id}/key/${row.keyId}/suggestion/${suggestion.id}/accept?declineOther=false`, 'PUT');
+        if (receipt.accepted?.id !== suggestion.id || receipt.accepted.languageId !== language.id || receipt.accepted.keyId !== row.keyId ||
+            receipt.accepted.state !== 'ACCEPTED' || receipt.accepted.translation !== entry.suggestion || !same(receipt.declined, [])) throw Error('Unexpected acceptance receipt. No retries.');
+        report.accepted++; result.status = 'accepted';
+      } else result.status = 'matched-existing';
       if (fromTolgee(entry.suggestion) !== entry.translation) {
         result.status = 'correction-outcome-unknown';
-        const updated = await api(`${project}/translations`, 'PUT', { key: entry.key, namespace: null, branch: row.branch ?? undefined,
+        // The view labels the default branch "main" even when the project's
+        // paid branching feature is disabled. Omit the optional branch selector.
+        const updated = await api(`${project}/translations`, 'PUT', { key: entry.key, namespace: null,
           translations: { [entry.language]: toTolgee(entry.translation) } });
         if (updated.keyId !== row.keyId || updated.keyName !== entry.key || updated.keyNamespace || updated.keyIsPlural !== false ||
             fromTolgee(updated.translations?.[entry.language]?.text) !== entry.translation) throw Error('Correction could not be verified. No retries.');

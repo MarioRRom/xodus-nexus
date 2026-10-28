@@ -5,8 +5,9 @@
     "source": "Backend {{version}}",
     "suggestion": "Backend {version}",
     "translation": "Backend {{version}}",
-    "previous": null,
-    "previousState": "UNTRANSLATED"
+    "previous": "Backend {version}",
+    "previousState": "TRANSLATED",
+    "existing": true
   },
   {
     "language": "fr",
@@ -14,8 +15,9 @@
     "source": "Browse game files",
     "suggestion": "Parcourir les fichier de jeu",
     "translation": "Parcourir les fichiers du jeu",
-    "previous": null,
-    "previousState": "UNTRANSLATED"
+    "previous": "Parcourir les fichier de jeu",
+    "previousState": "TRANSLATED",
+    "existing": true
   },
   {
     "language": "fr",

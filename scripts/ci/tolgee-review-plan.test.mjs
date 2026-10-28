@@ -22,7 +22,7 @@ function fixture(change) {
       return { accepted: { ...row.translations.fr.suggestions[0], keyId: 10, languageId: 2, state: 'ACCEPTED' }, declined: [] };
     }
     if (route === '/v2/projects/36162/translations' && method === 'PUT') {
-      assert.deepEqual(body, { key: 'hello', namespace: null, branch: 'main', translations: { fr: 'Bonjour {name}' } });
+      assert.deepEqual(body, { key: 'hello', namespace: null, translations: { fr: 'Bonjour {name}' } });
       row.translations.fr.text = body.translations.fr;
       return clone(row);
     }
@@ -49,6 +49,17 @@ test('preview and changed digest never mutate translations', async () => {
   assert.ok(f.calls.every(call => call.method === 'GET'));
   await assert.rejects(reviewPlan({ api: f.api, english, plan: selected, digest: '0'.repeat(64), apply: true }), /digest/);
   assert.ok(f.calls.every(call => call.method === 'GET'));
+});
+
+test('explicit exact existing-text selections recover a partial batch without accepting anything twice', async () => {
+  const f = fixture(), selected = plan();
+  f.row.translations.fr.text = 'Bonjor {name}'; f.row.translations.fr.state = 'TRANSLATED'; f.row.translations.fr.suggestions = [];
+  selected[0] = { ...selected[0], previous: 'Bonjor {name}', previousState: 'TRANSLATED', existing: true };
+  const report = await reviewPlan({ api: f.api, english, plan: selected, digest: planDigest(selected), apply: true });
+  assert.equal(report.accepted, 0); assert.equal(report.corrected, 1); assert.equal(report.reviewed, 1);
+  assert.ok(f.calls.every(call => !call.route.includes('/accept')));
+  assert.throws(() => validatePlan([{ ...selected[0], previous: 'Other' }], english));
+  assert.throws(() => validatePlan([{ ...selected[0], previousState: 'UNTRANSLATED' }], english));
 });
 
 test('official simple view model permits an absent untranslated cell ID but receipts still require full identity', async () => {
