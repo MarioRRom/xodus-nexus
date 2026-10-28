@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import type { AccountLibraryPage, AppSnapshot, CatalogProduct, CatalogSearchResult, DiagnosticLog, Game, GameContentPlan, GameLaunchOptions, Page, Settings, XboxProfileRequest } from '../shared/types';
 import {OverlayShortcutRecorder} from './OverlayShortcutRecorder';
+import {reconcileSettingsDraft} from './settings-draft';
 import {xboxOverlaySettings} from '../shared/xbox-overlay-settings';
 import { XboxSocial } from './XboxSocial';
 import './xbox-desktop-social.css';
@@ -859,10 +860,15 @@ function ToggleStatus({ ok, label }: { ok: boolean; label: string }) {
 export function SettingsPage({ data, toast }: { data: AppSnapshot; toast: (value: Toast) => void }) {
   const confirm = useConfirmation();
   const [form, setForm] = useState<Settings>(data.settings);
+  const previousSettings = useRef(data.settings);
   const [busy, setBusy] = useState<string>();
   const [logs, setLogs] = useState<string[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState<string[]>([]);
-  useEffect(() => setForm(data.settings), [data.settings]);
+  useEffect(() => {
+    const previous = previousSettings.current;
+    previousSettings.current = data.settings;
+    setForm(current => reconcileSettingsDraft(current, previous, data.settings));
+  }, [data.settings]);
   useEffect(() => window.launcher.onOperationLog(({ scope, line }) => {
     if (scope === 'backend') setLogs((items) => [...items.slice(-199), line]);
     if (scope === 'runtime') setRuntimeLogs((items) => [...items.slice(-199), line]);
