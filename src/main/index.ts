@@ -2111,7 +2111,7 @@ app.whenReady().then(async () => {
   void checkLauncherUpdate().then(() => emitSnapshot());
   registerIpc();
 
-  const guideInitial=()=>({auth:guideAuth(),profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),language:store.settings.interfaceLanguage,runtimeInvites:combinedInviteState(gameInviteBridges.values())});
+  const guideInitial=()=>({auth:guideAuth(),party:xboxParty.current,voice:voiceHost.state,invites:currentXboxInvites,profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),language:store.settings.interfaceLanguage,runtimeInvites:combinedInviteState(gameInviteBridges.values())});
   const guideHelper=app.isPackaged?path.join(process.resourcesPath,'overlay','xbox_guide.py'):path.join(__dirname,'..','..','assets','overlay','xbox_guide.py');
   gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),helper:guideHelper,
    account:()=>{const context=nativeSocialConnection();return context?JSON.stringify(context):undefined;},initial:guideInitial,
@@ -2136,10 +2136,20 @@ app.whenReady().then(async () => {
      case 'chooseGameInviteRecipient':{const value=runtimeInvitation(text(0));return value.bridge.choose(value.id,text(1));}
      case 'cancelGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.cancel(value.id);}
      case 'acceptGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.accept(value.id);}
+        case 'getXboxParty':return xboxParty.current;
+        case 'getXboxActiveParties':return xboxParty.activeParties();
+        case 'leaveExistingXboxParty':return xboxParty.leaveExisting(text(0));
+        case 'inviteXboxPartyFriend':return xboxParty.invite(text(0));
+        case 'getXboxInvites':return (await xboxInvites.list()).filter(invite=>invite.kind==='party');
+        case 'getXboxVoiceState':return voiceHost.state;
+        case 'controlXboxVoice':return voiceHost.control(args[0] as XboxVoiceCommand);
      default:throw Error('Unsupported Guide action.');
     }
    },
   });
+  xboxParty.on('state',state=>gameGuide.publish('party',state));
+  (app as import('node:events').EventEmitter).on('nexus-voice-state',(state:unknown)=>gameGuide.publish('voice',state));
+  xboxInvites.on('change',()=>gameGuide.publish('invites',currentXboxInvites));
   nativeSocialResets.push(()=>gameGuide.reset());
   nativeSocialSnapshots.push(()=>{gameGuide.publish('auth',guideAuth());gameGuide.publish('language',store.settings.interfaceLanguage);gameGuide.publish('runtimeInvites',combinedInviteState(gameInviteBridges.values()));});
   nativeSocialShutdown.push(async()=>{await overlayShortcut?.shutdown();await gameGuide.shutdown();});
