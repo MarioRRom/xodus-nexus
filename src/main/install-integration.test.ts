@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
   events: new Map<string, (...args: any[]) => any>(),
   downloads: [] as { args: string[]; progress: (paused?: boolean, phase?: string) => void; finish: (code: number) => void }[],
+  installQueue: undefined as undefined | { settled(id: string): Promise<void> },
   game: undefined as undefined | { finish: (code?: number, output?: string) => void },
   quit: vi.fn(), maximize: vi.fn(),
   blockDisplay: vi.fn(() => 7), releaseDisplay: vi.fn(() => true),
@@ -64,6 +65,14 @@ vi.mock('./launcher-update.js', () => ({ LauncherUpdater: class { state = {}; as
 vi.mock('./xbox-game-guide.js',()=>({XboxGameGuide:class {reset(){} bind(){} unbind(){} publish(){} async shutdown(){}}}));
 vi.mock('./xbox-overlay-shortcut.js',()=>({ensureOverlayDesktopEntry:async()=>{},XboxOverlayShortcut:class {current={state:'disabled'};async configure(){}async shutdown(){}}}));
 vi.mock('./launcher-fonts.js', () => ({ adoptLauncherFonts: () => undefined, externalFontEnvironment: (env: unknown) => env }));
+// Keep the real queue and its cleanup barrier. A terminal snapshot can precede
+// asynchronous metadata writes, so fixture phases must await actual settlement.
+vi.mock('./install-queue.js', async original => {
+  const module = await original<typeof import('./install-queue.js')>();
+  return { ...module, InstallQueue: class extends module.InstallQueue {
+    constructor(idle?: () => void) { super(idle); h.installQueue = this; }
+  } };
+});
 // Deletion is restricted to disposable fixture directories, never real games.
 vi.mock('./game-delete.js', () => ({ deleteGameDirectory: (target: { path: string }) => h.deleteFiles(target.path) }));
 vi.mock('./session-environment.js', () => ({ prepareGameModeKeyring: async () => 'skipped' }));
@@ -581,10 +590,13 @@ it('keeps interrupted updates blocked after cancellation and queue removal, then
   expect(h.downloads).toHaveLength(count);
   expect(await fs.access(marker).then(() => true, () => false)).toBe(false);
   h.backend.capabilities.streamingUpdateRecovery = true;
+  let previousUpdate: string | undefined;
   const start = async () => {
+    if (previousUpdate) await h.installQueue!.settled(previousUpdate);
     h.downloads.splice(0);
     const id = await ipc('update-installed-game', game.id);
     await vi.waitFor(() => expect(h.downloads).toHaveLength(1));
+    previousUpdate = id;
     return id as string;
   };
   const cancelled = await start();
@@ -619,6 +631,7 @@ it('keeps interrupted updates blocked after cancellation and queue removal, then
   h.downloads[0].progress(false, 'complete'); h.downloads[0].finish(0);
   await vi.waitFor(() => expect(row(recovered).status).toBe('complete'));
   await vi.waitFor(() => expect(h.notifications).toHaveLength(notifications + 1));
+  await h.installQueue!.settled(recovered);
   expect(installed()).toMatchObject({ installState: 'ready' });
   expect(installed().updateIncomplete).toBeUndefined();
   expect(await fs.readFile(path.join(directory, 'Recovery.exe'), 'utf8')).toBe('MZ new fixture');

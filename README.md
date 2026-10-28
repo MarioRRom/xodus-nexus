@@ -81,6 +81,14 @@ Flatpak version available through Discover. Other browsers are not supported.
 - **Settings → Shader cache** sets the per-game Mesa/NVIDIA driver cache limit, 4 GiB by default. Changes apply on the next game launch; explicit environment overrides take precedence.
 - For account, library or installation errors, use **Settings → Xodus backend → Open backend diagnostic log**. The local log contains safe error codes and operation results, not credentials. Review it before sharing.
 
+## In-game overlay
+
+Enable **Settings → Nexus Overlay** to open friends, chats and party controls
+while playing. Record a shortcut, choose the screen edge and save the settings.
+The overlay requires Python 3, PyGObject, GTK 3 and WebKitGTK 4.1. Your desktop
+may ask you to approve the shortcut on Wayland; fullscreen and monitor detection
+depend on the desktop. The overlay is optional and disabled by default.
+
 ## Offline play
 
 Use **Settings → Offline permissions** while online to designate this PC for
