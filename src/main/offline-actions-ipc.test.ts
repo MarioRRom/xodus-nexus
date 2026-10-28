@@ -58,3 +58,15 @@ it('a refused server mutation releases the guard without pretending the designat
   await expect(f.call('set-offline-permissions',true)).rejects.toThrow('refused');
   expect(f.settle).not.toHaveBeenCalled();expect(()=>f.checkIdle()).not.toThrow();
 });
+
+it('cache recovery keeps its original data root across asynchronous filesystem checks',async()=>{
+  const helper=parsed.statements.filter(node=>ts.isFunctionDeclaration(node)&&node.name&&['offlineDataRoot','offlineLicenseCache'].includes(node.name.text)).map(node=>node.getText(parsed)).join('\n');
+  const check=deferred<boolean>(),store={settings:{runtimeRoot:'/original/runtimes'}};
+  const revoke=vi.fn(async()=>{}),ready=vi.fn(async()=>{});
+  const context:any={path,store,backend:{current:{capabilities:{licenseCache:true}}},offlineAccessRevoked:()=>check.promise,revokeOfflineAccess:revoke,assertOfflineAccessReady:ready,licenseCacheDirectory:(root:string)=>path.join(root,'license-cache')};
+  runInNewContext(ts.transpileModule(helper+'\nglobalThis.recover=offlineLicenseCache;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+  const pending=context.recover();store.settings.runtimeRoot='/different/runtimes';check.resolve(true);
+  await expect(pending).resolves.toBe('/original/license-cache');
+  expect(revoke).toHaveBeenCalledOnce();expect(revoke).toHaveBeenCalledWith('/original');
+  expect(ready).toHaveBeenCalledOnce();expect(ready).toHaveBeenCalledWith('/original');
+});

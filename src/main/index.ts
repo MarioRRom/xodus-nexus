@@ -521,10 +521,10 @@ async function settleOfflinePermissions(status: OfflinePermissions, changed: boo
   else if (await applyOfflinePermissions(offlineDataRoot(), status)) emitLog('offline', 'Removed stored offline licenses and identities (designation-off).');
   return status;
 }
-async function offlineLicenseCache(): Promise<string | undefined> {
-  if (await offlineAccessRevoked(offlineDataRoot())) await revokeOfflineAccess(offlineDataRoot());
-  await assertOfflineAccessReady(offlineDataRoot());
-  return backend.current.capabilities.licenseCache ? licenseCacheDirectory(offlineDataRoot()) : undefined;
+async function offlineLicenseCache(root = offlineDataRoot()): Promise<string | undefined> {
+  if (await offlineAccessRevoked(root)) await revokeOfflineAccess(root);
+  await assertOfflineAccessReady(root);
+  return backend.current.capabilities.licenseCache ? licenseCacheDirectory(root) : undefined;
 }
 let designationCheck: Promise<void> | undefined;
 let offlinePermissionChanging = false;
