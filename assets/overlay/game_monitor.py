@@ -2,6 +2,8 @@
 import ctypes
 import ctypes.util
 import os
+import json
+import subprocess
 
 
 class WindowPids:
@@ -107,3 +109,69 @@ def locate_game_monitor(display, game_pid):
             lambda window: reader.read(GdkX11.X11Window.get_xid(window)))
     finally:
         reader.close()
+
+
+def kde_active_monitor(display):
+    """Optional read-only KWin hint for windows not exposed through XWayland."""
+    if "kde" not in os.environ.get("XDG_CURRENT_DESKTOP", "").lower().split(":"):
+        return None
+    try:
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        reply = bus.call_sync("org.kde.KWin", "/KWin", "org.kde.KWin", "activeOutputName",
+                              None, GLib.VariantType.new("(s)"), Gio.DBusCallFlags.NO_AUTO_START, 300, None)
+        name = reply.unpack()[0]
+        if not isinstance(name, str) or not 0 < len(name) < 256:
+            return None
+        # No compositor scripts or settings changes. kscreen-doctor already ships
+        # with Plasma; failure or an unknown layout simply uses the next hint.
+        result = subprocess.run(["kscreen-doctor", "-j"], capture_output=True, timeout=0.7, check=True)
+        if len(result.stdout) > 1024 * 1024:
+            return None
+        outputs = json.loads(result.stdout).get("outputs", [])
+        selected = [output for output in outputs if output.get("name") == name and output.get("enabled") is True]
+        if len(selected) != 1:
+            return None
+        pos = selected[0].get("pos", {})
+        if any(type(pos.get(key)) is not int for key in ("x", "y")):
+            return None
+        matches = [display.get_monitor(i) for i in range(display.get_n_monitors())
+                   if display.get_monitor(i).get_geometry().x == pos["x"] and display.get_monitor(i).get_geometry().y == pos["y"]]
+        return matches[0] if len(matches) == 1 else None
+    except Exception:
+        return None
+
+
+def select_guide_monitor(display, game_pid, fallback, locate=locate_game_monitor, active=kde_active_monitor):
+    """Prefer the game, then active output. Missing metadata must not block Guide."""
+    monitors = [display.get_monitor(i) for i in range(display.get_n_monitors())]
+    if not monitors:
+        return None
+    if game_pid:
+        try:
+            monitor = locate(display, game_pid)
+            if monitor is not None:
+                return monitor
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError):
+            pass
+        monitor = active(display)
+        if monitor is not None:
+            return monitor
+        try:
+            window = display.get_default_screen().get_active_window()
+            if window is not None and window.is_visible():
+                return display.get_monitor_at_window(window)
+        except (AttributeError, RuntimeError):
+            pass
+        try:
+            _, x, y = display.get_default_seat().get_pointer().get_position()
+            monitor = display.get_monitor_at_point(x, y)
+            if monitor is not None:
+                return monitor
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+    for monitor in monitors:
+        rect = monitor.get_geometry()
+        if all(getattr(rect, key) == fallback[key] for key in ("x", "y", "width", "height")):
+            return monitor
+    return display.get_primary_monitor() or monitors[0]

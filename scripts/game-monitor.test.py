@@ -88,4 +88,31 @@ for pid in (True,0,-1,2**31,'100'):
     except host.GuideError:
         pass
 cases.append('bounded-integer-launch-identity-config')
+
+class Display:
+    def __init__(self, monitors, active_window=None):
+        self.monitors, self.active_window = monitors, active_window
+    def get_n_monitors(self): return len(self.monitors)
+    def get_monitor(self, index): return self.monitors[index]
+    def get_primary_monitor(self): return self.monitors[0] if self.monitors else None
+    def get_default_screen(self): return NS(get_active_window=lambda: self.active_window)
+    def get_monitor_at_window(self, window): return right
+    def get_default_seat(self): return None
+
+display = Display([left, right])
+fallback = vars(left.geometry)
+assert module.select_guide_monitor(display, 100, fallback, lambda *_: right, lambda _: left) is right
+cases.append('actual-game-display-wins-over-active-output')
+assert module.select_guide_monitor(display, 100, fallback, lambda *_: None, lambda _: right) is right
+cases.append('unresolved-game-opens-on-kde-active-output')
+def unsupported(*_): raise ValueError('native-wayland-window-not-exposed')
+assert module.select_guide_monitor(display, 100, fallback, unsupported, lambda _: right) is right
+cases.append('unavailable-x11-metadata-does-not-block-guide')
+assert module.select_guide_monitor(Display([left, right], game), 100, fallback, lambda *_: None, lambda _: None) is right
+cases.append('active-x11-window-before-primary-fallback')
+assert module.select_guide_monitor(display, 100, fallback, lambda *_: None, lambda _: None) is left
+assert module.select_guide_monitor(display, 100, vars(rect(9000,0,1,1)), lambda *_: None, lambda _: None) is left
+cases.append('no-window-metadata-still-opens-on-available-display')
+assert module.select_guide_monitor(Display([]), 100, fallback, lambda *_: None, lambda _: None) is None
+cases.append('only-no-connected-displays-blocks-guide')
 print({"passed": True, "cases": cases})

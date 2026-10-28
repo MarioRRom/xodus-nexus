@@ -10,7 +10,7 @@ import os
 import re
 import sys
 from urllib.parse import urlsplit
-from game_monitor import locate_game_monitor
+from game_monitor import select_guide_monitor
 
 SHELF_REVEAL_SCRIPT = """(()=>{const root=document.documentElement;
 root.classList.remove('nexus-guide-shown');void root.offsetWidth;
@@ -180,24 +180,11 @@ Object.defineProperty(window,'nexusOverlaySession',{value:TOKEN,writable:false,c
 
         def select_monitor(self):
             display = Gdk.Display.get_default()
-            wanted = config["monitor"]
-            matches = []
-            if config.get("gamePid"):
-                monitor = locate_game_monitor(display, config["gamePid"])
-                if monitor is not None:
-                    wanted = {key: getattr(monitor.get_geometry(), key) for key in ("x", "y", "width", "height")}
-                elif display.get_n_monitors() == 1:
-                    wanted = {key: getattr(display.get_monitor(0).get_geometry(), key) for key in ("x", "y", "width", "height")}
-                else:
-                    raise GuideError("game-monitor-unavailable")
-            for i in range(display.get_n_monitors()):
-                monitor = display.get_monitor(i)
-                rect = monitor.get_geometry()
-                if all(getattr(rect, key) == wanted[key] for key in wanted):
-                    matches.append((i, monitor))
-            if len(matches) != 1:
+            monitor = select_guide_monitor(display, config.get("gamePid"), config["monitor"])
+            if monitor is None:
                 raise GuideError("game-monitor-unavailable")
-            index, monitor = matches[0]
+            wanted = {key: getattr(monitor.get_geometry(), key) for key in ("x", "y", "width", "height")}
+            index = next(i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor)
             if layered:
                 GtkLayerShell.set_monitor(self.window, monitor)
             else:
