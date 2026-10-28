@@ -71,8 +71,15 @@ eligible batch before exclusions. Keep the same selected languages in both runs.
 For individually checked conflicts, identical technical terms or typo corrections,
 a maintainer can commit explicit selections in `.github/translations/review-plan.json`.
 Each selection records the exact English source, previous translation and state,
-chosen suggestion and final text. Run `preview-reviewed-plan` with the plan's SHA256
-in `review_digest`, then `apply-reviewed-plan` with the same digest after review.
+chosen suggestion and final text. Compute the canonical plan digest locally:
+
+```sh
+node --input-type=module -e 'import fs from "node:fs"; import {planDigest} from "./scripts/tolgee-review-plan.mjs"; console.log(planDigest(JSON.parse(fs.readFileSync(".github/translations/review-plan.json", "utf8"))))'
+```
+
+Run `preview-reviewed-plan` with that digest in `review_digest`, then
+`apply-reviewed-plan` with the same digest after review. The digest covers the
+parsed selections, not the whitespace in the JSON file.
 The tool checks the entire plan before writing, refreshes each batch, accepts the
 original suggestion to preserve attribution, applies any checked correction and
 verifies the final text before marking it Reviewed. Comments, QA issues, outdated
