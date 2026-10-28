@@ -5,6 +5,7 @@ import {externalLauncherEnvironment} from './launcher-environment.js';
 import {XboxGuideServer,type GuideEvent,type GuideInitial} from './xbox-guide-server.js';
 
 export type GuideMonitor={x:number;y:number;width:number;height:number};
+const monitorUnavailable='Nexus Guide could not locate the game window on a supported display. Keep the game open and try again.';
 type Options={directory:string;helper:string;account:()=>string|undefined;initial:()=>GuideInitial;invoke:(method:string,args:unknown[])=>Promise<unknown>;problem:(message:string)=>void;monitor:()=>GuideMonitor;enabled:()=>boolean};
 export async function checkGuideHost(helper:string):Promise<void>{
  try{
@@ -19,7 +20,7 @@ export function gameGuideMonitor(value:GuideMonitor):GuideMonitor{
 
 /** A game-session view using standard display bounds. Desktop windows and shared audio have independent lifetimes. */
 export class XboxGameGuide {
-  private game?:{id:string;title:string};
+  private game?:{id:string;title:string;pid?:number};
   private view?:{monitor:GuideMonitor};
   private http?:XboxGuideServer;
   private child?:ChildProcessWithoutNullStreams;
@@ -38,9 +39,10 @@ export class XboxGameGuide {
   get shown():boolean{return this.visible||this.wanted;}
   get interactive():boolean{return this.visible&&this.wanted&&Boolean(this.game)&&this.options.enabled()&&this.session===this.options.account();}
   get bound():boolean{return Boolean(this.game);}
-  bind(id:string,title:string):void{
-    if(this.game?.id===id)return;
-    this.unbind();this.game={id,title};
+  bind(id:string,title:string,pid?:number):void{
+    if(this.game?.id===id&&this.game.pid===pid)return;
+    if(pid!==undefined&&(!Number.isSafeInteger(pid)||pid<=0||pid>=2**31))throw Error('Invalid Guide game process.');
+    this.unbind();this.game={id,title,pid};
     void this.refresh();this.watch=setInterval(()=>void this.refresh(),1000);this.watch.unref();
 
   }
@@ -88,13 +90,13 @@ export class XboxGameGuide {
     if(!this.game||!this.options.enabled())return false;
     await this.refresh();if(!this.view)return false;
     const bound=this.game;
-    void this.show().catch(()=>{if(this.game===bound)this.options.problem('Nexus Guide could not open. Reopen the guide and try again.');});
+    void this.show().catch(error=>{if(this.game===bound)this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Guide could not open. Reopen the guide and try again.');});
     return true;
   }
   showProfile(id:string,xuid:string,closed:()=>void):void{
     if(this.profile||!this.game||!this.options.enabled())throw Error('Enable the Nexus Guide in Nexus Settings to view game profiles.');
     this.profile={id,xuid};this.profileClosed=closed;this.publish('profile',this.profileRequest);
-    void this.show().catch(()=>{if(this.profile?.id===id){this.hide(false);this.options.problem('Nexus Guide could not display the player profile.');}});
+    void this.show().catch(error=>{if(this.profile?.id===id){this.hide(false);this.options.problem(error instanceof Error&&error.message===monitorUnavailable?monitorUnavailable:'Nexus Guide could not display the player profile.');}});
   }
   completeProfile(id:string,hide=true):void{
     if(this.profile?.id!==id)return;
@@ -136,10 +138,10 @@ export class XboxGameGuide {
             if(value.event==='ready'){ready=true;clearTimeout(timer);resolve();}
             if(value.event==='shown'){this.visible=this.wanted;this.publish('visibility',this.visible);if(!this.wanted)child.stdin.write('hide\n');}
             if(value.event==='hidden'){this.visible=false;this.wanted=false;this.publish('visibility',false);if(this.profile)this.completeProfile(this.profile.id,false);}
-            if(value.event==='error'){reject(Error('Nexus Guide host unavailable.'));this.reset();}
+            if(value.event==='error'){reject(Error(value.code==='game-monitor-unavailable'?monitorUnavailable:'Nexus Guide host unavailable.'));this.reset();}
           }catch{}}
         });
-        child.stdin.write(JSON.stringify({url,token:server.token,monitor:view.monitor})+'\n');
+        child.stdin.write(JSON.stringify({url,token:server.token,monitor:view.monitor,...(this.game?.pid?{gamePid:this.game.pid}:{})})+'\n');
       });
       if(generation===this.generation&&this.wanted)child.stdin.write('show\n');
     })();this.opening=opening;

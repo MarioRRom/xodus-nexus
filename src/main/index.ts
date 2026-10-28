@@ -1138,7 +1138,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     }, { stopPrefix: protonRunner?.stopPrefix });
     operations.set(operationId, tracked.child);
     gameProcesses.set(operationId, tracked);
-    gameGuide?.bind(id,game.title);
+    gameGuide?.bind(id,game.title,tracked.child.pid);
     releaseDisplay = gameDisplay.acquire();
     gameOperation.status = 'running';
     gameOperation.phase = 'Xodus is running; waiting for the game window…';
@@ -2214,7 +2214,9 @@ app.whenReady().then(async () => {
   gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),helper:guideHelper,
    account:()=>{const context=nativeSocialConnection();return context?JSON.stringify(context):undefined;},initial:guideInitial,
    enabled:()=>xboxOverlaySettings(store.settings).overlayEnabled,
-   monitor:()=>screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds,
+   // Only a single-display/legacy fallback. The host locates the game's window
+   // by its launch process group, never the unsupported Wayland cursor position.
+   monitor:()=>screen.getPrimaryDisplay().bounds,
    problem:message=>{if(Notification.isSupported())new Notification({title:nativeText('Nexus Guide'),body:nativeText(message)}).show();},
    invoke:async(method,args)=>{
     if(guideParty.handles(method))return guideParty.invoke(method,args);

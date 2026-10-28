@@ -37,13 +37,25 @@ it('checks dependencies without importing a display, starting a UI or accepting 
 it('opens and toggles only a bound game session without requiring compositor window metadata',async()=>{
  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-portable-guide-'));directories.push(directory);
  const helper=path.join(directory,'host.py'),events=path.join(directory,'events');
- await fs.writeFile(helper,`import json,sys,pathlib\nc=json.loads(sys.stdin.readline())\np=pathlib.Path(__file__).with_name('events')\np.write_text(json.dumps({'monitor':c['monitor']}))\nprint(json.dumps({'event':'ready'}),flush=True)\nfor line in sys.stdin:\n command=line.strip()\n with p.open('a') as f:f.write('\\n'+command)\n if command=='quit':break\n print(json.dumps({'event':'shown' if command=='show' else 'hidden'}),flush=True)\n`);
+ await fs.writeFile(helper,`import json,sys,pathlib\nc=json.loads(sys.stdin.readline())\np=pathlib.Path(__file__).with_name('events')\np.write_text(json.dumps({'monitor':c['monitor'],'gamePid':c.get('gamePid')}))\nprint(json.dumps({'event':'ready'}),flush=True)\nfor line in sys.stdin:\n command=line.strip()\n with p.open('a') as f:f.write('\\n'+command)\n if command=='quit':break\n print(json.dumps({'event':'shown' if command=='show' else 'hidden'}),flush=True)\n`);
  let enabled=true;
  const guide=new XboxGameGuide({directory,helper,account:()=> 'synthetic',initial:()=>({auth:{},party:{},voice:{},invites:[],profile:null}),invoke:async()=>{},problem:vi.fn(),monitor:()=>({x:0,y:0,width:1920,height:1080}),enabled:()=>enabled});guides.push(guide);
- expect(guide.interactive).toBe(false);expect(await guide.toggle()).toBe(false);guide.bind('fixture','Synthetic game');expect(await guide.toggle()).toBe(true);
+ expect(guide.interactive).toBe(false);expect(await guide.toggle()).toBe(false);guide.bind('fixture','Synthetic game',43210);expect(await guide.toggle()).toBe(true);
  await vi.waitFor(async()=>expect(await fs.readFile(events,'utf8')).toContain('\nshow'));
  await vi.waitFor(()=>expect(guide.interactive).toBe(true));
  expect(JSON.parse((await fs.readFile(events,'utf8')).split('\n')[0]).monitor).toEqual({x:0,y:0,width:1920,height:1080});
+ expect(JSON.parse((await fs.readFile(events,'utf8')).split('\n')[0]).gamePid).toBe(43210);
  expect(await guide.toggle()).toBe(true);expect(guide.interactive).toBe(false);await vi.waitFor(async()=>expect(await fs.readFile(events,'utf8')).toContain('\nhide'));
  enabled=false;expect(await guide.toggle()).toBe(false);guide.unbind();expect(await guide.toggle()).toBe(false);
+});
+
+it('reports an unresolved game display honestly instead of choosing the cursor monitor',async()=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'nexus-guide-monitor-error-'));directories.push(directory);
+ const helper=path.join(directory,'host.py');
+ await fs.writeFile(helper,"import sys,json\njson.loads(sys.stdin.readline())\nprint(json.dumps({'event':'error','code':'game-monitor-unavailable'}),flush=True)\n");
+ const problem=vi.fn(),guide=new XboxGameGuide({directory,helper,account:()=> 'synthetic',initial:()=>({auth:{},profile:null}),invoke:async()=>{},problem,monitor:()=>({x:0,y:0,width:1920,height:1080}),enabled:()=>true});guides.push(guide);
+ for(const pid of [-1,0,NaN,1.5,2**31])expect(()=>guide.bind('fixture','Synthetic',pid)).toThrow('process');
+ guide.bind('fixture','Synthetic',43210);await guide.toggle();
+ await vi.waitFor(()=>expect(problem).toHaveBeenCalledWith('Nexus Guide could not locate the game window on a supported display. Keep the game open and try again.'));
+ expect(guide.interactive).toBe(false);
 });

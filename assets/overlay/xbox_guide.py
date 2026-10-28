@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from urllib.parse import urlsplit
+from game_monitor import locate_game_monitor
 
 SHELF_REVEAL_SCRIPT = """(()=>{const root=document.documentElement;
 root.classList.remove('nexus-guide-shown');void root.offsetWidth;
@@ -36,7 +37,7 @@ def emit(event, code=None):
 def parse_config(line):
     try:
         value = json.loads(line)
-        if not isinstance(value, dict) or set(value) != {"url", "token", "monitor"}:
+        if not isinstance(value, dict) or not {"url", "token", "monitor"} <= set(value) or set(value) - {"url", "token", "monitor", "gamePid"}:
             raise ValueError()
         url, token, monitor = value["url"], value["token"], value["monitor"]
         if not isinstance(url, str) or len(url) > 256:
@@ -54,6 +55,8 @@ def parse_config(line):
         if any(abs(monitor[k]) > 131072 for k in ("x", "y")):
             raise ValueError()
         if any(not 0 < monitor[k] <= 32768 for k in ("width", "height")):
+            raise ValueError()
+        if "gamePid" in value and (type(value["gamePid"]) is not int or not 0 < value["gamePid"] < 2**31):
             raise ValueError()
         return value
     except (ValueError, TypeError, KeyError, OverflowError):
@@ -179,6 +182,14 @@ Object.defineProperty(window,'nexusOverlaySession',{value:TOKEN,writable:false,c
             display = Gdk.Display.get_default()
             wanted = config["monitor"]
             matches = []
+            if config.get("gamePid"):
+                monitor = locate_game_monitor(display, config["gamePid"])
+                if monitor is not None:
+                    wanted = {key: getattr(monitor.get_geometry(), key) for key in ("x", "y", "width", "height")}
+                elif display.get_n_monitors() == 1:
+                    wanted = {key: getattr(display.get_monitor(0).get_geometry(), key) for key in ("x", "y", "width", "height")}
+                else:
+                    raise GuideError("game-monitor-unavailable")
             for i in range(display.get_n_monitors()):
                 monitor = display.get_monitor(i)
                 rect = monitor.get_geometry()
