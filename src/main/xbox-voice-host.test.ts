@@ -17,12 +17,12 @@ beforeEach(()=>{h.windows=[];h.handlers.clear();delete process.env.VITE_DEV_SERV
 afterEach(async()=>{for(const host of hosts.splice(0))await host.shutdown();vi.useRealTimers();});
 function fixture(){
  const guide={mainFrame:{}},otherGuide={mainFrame:{}},changed=vi.fn(),leave=vi.fn(async()=>{}),busyWhenSettled:boolean[]=[];
- let host!:XboxVoiceHost;const settled=vi.fn(()=>busyWhenSettled.push(host.busy));
- host=new XboxVoiceHost('/app/dist-electron/main',{authorizeControl:event=>(event.sender===guide||event.sender===otherGuide)&&event.senderFrame===event.sender.mainFrame,stateChanged:changed,leave,settled});hosts.push(host);
+ let host!:XboxVoiceHost;const settled=vi.fn(()=>busyWhenSettled.push(host.busy)),canConnect=vi.fn(()=>true);
+ host=new XboxVoiceHost('/app/dist-electron/main',{authorizeControl:event=>(event.sender===guide||event.sender===otherGuide)&&event.senderFrame===event.sender.mainFrame,stateChanged:changed,leave,settled,canConnect});hosts.push(host);
  const ipc=(name:string,event:any,...args:any[])=>h.handlers.get(name)!(event,...args);
  const own=()=>({sender:h.windows.at(-1).webContents,senderFrame:h.windows.at(-1).webContents.mainFrame});
  const event={sender:guide,senderFrame:guide.mainFrame};
- return {host,guide,otherGuide,event,own,ipc,changed,leave,settled,busyWhenSettled};
+ return {host,guide,otherGuide,event,own,ipc,changed,leave,settled,busyWhenSettled,canConnect};
 }
 async function loaded(){await vi.waitFor(()=>expect(h.windows).toHaveLength(1));return h.windows[0];}
 function sent(window:any,index=0){return window.webContents.send.mock.calls[index][1] as {id:string;command:any};}
@@ -62,10 +62,28 @@ it('grants only one own main-frame audio capture request during an explicitly di
  f.ipc('xbox-voice-owner-complete',f.own(),sent(w,1).id);await unmute;expect(()=>f.host.allowMicrophone()).toThrow('controls');
 });
 it('fails all pending commands and leaves the actual party once when the media owner dies',async()=>{
- const f=fixture();const outcomes=Array.from({length:8},()=>f.host.control({type:'start'}).then(()=>null,error=>error));const w=await loaded();
- await expect(f.host.control({type:'start'})).rejects.toThrow('busy');f.ipc('xbox-voice-owner-ready',f.own());
+ const f=fixture();const outcomes=Array.from({length:8},(_,index)=>f.host.control(index===0?{type:'start'}:{type:'setMuted',muted:true}).then(()=>null,error=>error));const w=await loaded();
+ await expect(f.host.control({type:'setMuted',muted:true})).rejects.toThrow('busy');f.ipc('xbox-voice-owner-ready',f.own());
  w.webHandlers.get('render-process-gone')();expect((await Promise.all(outcomes)).every(value=>value instanceof Error)).toBe(true);
  await vi.waitFor(()=>expect(f.leave).toHaveBeenCalledOnce());expect(w.destroyed).toBe(true);expect(f.host.contents).toBeUndefined();expect(f.host.state).toMatchObject({connected:false,muted:true,mutedMembers:[]});expect(h.windows).toHaveLength(1);
+});
+
+it('rejects duplicate start or accept from a second view without touching the first connection',async()=>{
+ const f=fixture();const first=f.host.control({type:'start'}),w=await loaded();
+ await expect(f.host.control({type:'start'})).rejects.toThrow('already connecting');
+ await expect(f.host.control({type:'accept',inviteId:'party:fixture'})).rejects.toThrow('already connecting');
+ f.ipc('xbox-voice-owner-ready',f.own());
+ f.canConnect.mockReturnValue(false); // Server party exists before ICE finishes.
+ f.ipc('xbox-voice-owner-complete',f.own(),sent(w).id);await first;
+ expect(f.host.state.connected).toBe(false);
+ await expect(f.host.control({type:'start'})).rejects.toThrow('already connecting');
+ await expect(f.host.control({type:'accept',inviteId:'party:fixture'})).rejects.toThrow('already connecting');
+ f.canConnect.mockReturnValue(true);
+ f.ipc('xbox-voice-owner-state',f.own(),{connected:true,muted:true,audioBlocked:false,mutedMembers:[]});
+ await expect(f.host.control({type:'start'})).rejects.toThrow('already connecting');
+ await expect(f.host.control({type:'accept',inviteId:'party:fixture'})).rejects.toThrow('already connecting');
+ expect(w.webContents.send).toHaveBeenCalledOnce();expect(w.destroyed).toBe(false);expect(f.leave).not.toHaveBeenCalled();
+ expect(f.host.state.connected).toBe(true);expect(h.windows).toHaveLength(1);
 });
 it('lets Leave interrupt a connecting owner and waits for actual-party cleanup without reconnecting',async()=>{
  const f=fixture();let finish!:()=>void;f.leave.mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));

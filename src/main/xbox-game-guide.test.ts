@@ -40,9 +40,10 @@ it('opens and toggles only a bound game session without requiring compositor win
  await fs.writeFile(helper,`import json,sys,pathlib\nc=json.loads(sys.stdin.readline())\np=pathlib.Path(__file__).with_name('events')\np.write_text(json.dumps({'monitor':c['monitor']}))\nprint(json.dumps({'event':'ready'}),flush=True)\nfor line in sys.stdin:\n command=line.strip()\n with p.open('a') as f:f.write('\\n'+command)\n if command=='quit':break\n print(json.dumps({'event':'shown' if command=='show' else 'hidden'}),flush=True)\n`);
  let enabled=true;
  const guide=new XboxGameGuide({directory,helper,account:()=> 'synthetic',initial:()=>({auth:{},party:{},voice:{},invites:[],profile:null}),invoke:async()=>{},problem:vi.fn(),monitor:()=>({x:0,y:0,width:1920,height:1080}),enabled:()=>enabled});guides.push(guide);
- expect(await guide.toggle()).toBe(false);guide.bind('fixture','Synthetic game');expect(await guide.toggle()).toBe(true);
+ expect(guide.interactive).toBe(false);expect(await guide.toggle()).toBe(false);guide.bind('fixture','Synthetic game');expect(await guide.toggle()).toBe(true);
  await vi.waitFor(async()=>expect(await fs.readFile(events,'utf8')).toContain('\nshow'));
+ await vi.waitFor(()=>expect(guide.interactive).toBe(true));
  expect(JSON.parse((await fs.readFile(events,'utf8')).split('\n')[0]).monitor).toEqual({x:0,y:0,width:1920,height:1080});
- expect(await guide.toggle()).toBe(true);await vi.waitFor(async()=>expect(await fs.readFile(events,'utf8')).toContain('\nhide'));
+ expect(await guide.toggle()).toBe(true);expect(guide.interactive).toBe(false);await vi.waitFor(async()=>expect(await fs.readFile(events,'utf8')).toContain('\nhide'));
  enabled=false;expect(await guide.toggle()).toBe(false);guide.unbind();expect(await guide.toggle()).toBe(false);
 });

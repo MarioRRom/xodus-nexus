@@ -987,5 +987,7 @@
   "social.guide_profile_failed": "Nexus Guide could not display the player profile.",
   "social.guide_closed_unexpectedly": "Nexus Guide closed unexpectedly. Reopen the guide and try again.",
   "social.guide_session_ended": "Nexus Guide session ended. Reopen it from the game.",
-  "social.guide_disconnected": "Nexus Guide disconnected."
+  "social.guide_disconnected": "Nexus Guide disconnected.",
+  "social.guide_party_requires_view": "Open the Guide to use Xbox party controls.",
+  "social.party_already_connecting": "Xbox party is already connecting or connected. Leave it before starting another."
 }

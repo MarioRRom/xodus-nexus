@@ -19,6 +19,7 @@ import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cach
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
 import { backendLock } from './backend-package.js';
 import {XboxGameGuide,checkGuideHost} from './xbox-game-guide.js';
+import {XboxGuideParty} from './xbox-guide-party.js';
 import {XboxOverlayShortcut,ensureOverlayDesktopEntry} from './xbox-overlay-shortcut.js';
 import {xboxOverlaySettings,xboxOverlayPatch} from '../shared/xbox-overlay-settings.js';
 import { BackendManager } from './backend.js';
@@ -2032,7 +2033,7 @@ app.whenReady().then(async () => {
   voiceHost=new XboxVoiceHost(__dirname,{
    authorizeControl:event=>event.sender===mainWindow?.webContents&&event.senderFrame===event.sender.mainFrame&&Boolean(nativeSocialConnection()),
    stateChanged:state=>{mainWindow?.webContents.send('xbox-voice-state',state);app.emit('nexus-voice-state',state);},
-   leave:()=>xboxParty.leave(),settled:finishShortcutSession,
+   leave:()=>xboxParty.leave(),settled:finishShortcutSession,canConnect:()=>!xboxParty.active&&!xboxParty.current.id,
   });
   nativeSocialBeforeAuth.push(async()=>{await voiceHost.control({type:'leave'});await xboxParty.leave();});
   nativeSocialResets.push(()=>{void voiceHost.reset();xboxParty.suspend();xboxInvites.clear();currentXboxInvites=[];mainWindow?.webContents.send('xbox-invites',[]);});
@@ -2112,6 +2113,7 @@ app.whenReady().then(async () => {
   registerIpc();
 
   const guideInitial=()=>({auth:guideAuth(),party:xboxParty.current,voice:voiceHost.state,invites:currentXboxInvites,profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),language:store.settings.interfaceLanguage,runtimeInvites:combinedInviteState(gameInviteBridges.values())});
+  const guideParty=new XboxGuideParty({party:xboxParty,invites:xboxInvites,voice:voiceHost,interactive:()=>gameGuide?.interactive===true});
   const guideHelper=app.isPackaged?path.join(process.resourcesPath,'overlay','xbox_guide.py'):path.join(__dirname,'..','..','assets','overlay','xbox_guide.py');
   gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),helper:guideHelper,
    account:()=>{const context=nativeSocialConnection();return context?JSON.stringify(context):undefined;},initial:guideInitial,
@@ -2119,6 +2121,7 @@ app.whenReady().then(async () => {
    monitor:()=>screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds,
    problem:message=>{if(Notification.isSupported())new Notification({title:nativeText('Nexus Guide'),body:nativeText(message)}).show();},
    invoke:async(method,args)=>{
+    if(guideParty.handles(method))return guideParty.invoke(method,args);
     const text=(index:number)=>{const value=args[index];if(typeof value!=='string')throw Error('Invalid Guide request.');return value;};
     switch(method){
      case 'getXboxPlayerDetails':return xboxNativeSocial.details(text(0));
@@ -2136,13 +2139,6 @@ app.whenReady().then(async () => {
      case 'chooseGameInviteRecipient':{const value=runtimeInvitation(text(0));return value.bridge.choose(value.id,text(1));}
      case 'cancelGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.cancel(value.id);}
      case 'acceptGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.accept(value.id);}
-        case 'getXboxParty':return xboxParty.current;
-        case 'getXboxActiveParties':return xboxParty.activeParties();
-        case 'leaveExistingXboxParty':return xboxParty.leaveExisting(text(0));
-        case 'inviteXboxPartyFriend':return xboxParty.invite(text(0));
-        case 'getXboxInvites':return (await xboxInvites.list()).filter(invite=>invite.kind==='party');
-        case 'getXboxVoiceState':return voiceHost.state;
-        case 'controlXboxVoice':return voiceHost.control(args[0] as XboxVoiceCommand);
      default:throw Error('Unsupported Guide action.');
     }
    },

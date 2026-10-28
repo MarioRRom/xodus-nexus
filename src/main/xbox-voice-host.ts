@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import type {XboxVoiceCommand,XboxVoiceState} from '../shared/types.js';
 
-type Options={authorizeControl:(event:Electron.IpcMainInvokeEvent)=>boolean;stateChanged:(state:XboxVoiceState)=>void;leave:()=>Promise<void>;settled?:()=>void};
+type Options={authorizeControl:(event:Electron.IpcMainInvokeEvent)=>boolean;stateChanged:(state:XboxVoiceState)=>void;leave:()=>Promise<void>;settled?:()=>void;canConnect?:()=>boolean};
 type Pending={id:string;command:XboxVoiceCommand;resolve:()=>void;reject:(error:Error)=>void;timer?:ReturnType<typeof setTimeout>};
 const channels=['xbox-voice-state','xbox-voice-control','xbox-voice-owner-ready','xbox-voice-owner-state','xbox-voice-owner-complete'];
 const initial=():XboxVoiceState=>({connected:false,muted:true,audioBlocked:false,mutedMembers:[]});
@@ -45,6 +45,7 @@ export class XboxVoiceHost {
   private cleaning=0;
   private generation=0;
   private waiting=0;
+  private connecting=false;
   constructor(private readonly directory:string,private readonly options:Options){
     const control=(event:Electron.IpcMainInvokeEvent)=>{if(!this.owns(event)&&!options.authorizeControl(event))throw Error('Use Xbox voice controls from Nexus.');};
     ipcMain.handle('xbox-voice-state',event=>{control(event);return this.state;});
@@ -70,6 +71,9 @@ export class XboxVoiceHost {
     const command=voiceCommand(value);if(this.stopped)throw Error('Xbox party media is shutting down.');
     if(command.type==='leave'){const retry=!this.window&&this.cleanupFailed;this.fail(Error('Xbox party was left.'),false);if(retry)this.leaveParty();await this.cleanup;if(this.cleanupFailed)throw Error('Xbox could not confirm that the party was left.');return;}
     if(this.waiting>=8)throw Error('Xbox voice controls are busy. Wait a moment.');
+    const connecting=command.type==='start'||command.type==='accept';
+    if(connecting&&(this.connecting||this.current.connected||this.options.canConnect?.()===false))throw Error('Xbox party is already connecting or connected. Leave it before starting another.');
+    if(connecting)this.connecting=true;
     this.waiting++;
     try{
     const generation=this.generation;await this.cleanup;
@@ -81,7 +85,7 @@ export class XboxVoiceHost {
       const job:Pending={id:randomUUID(),command,resolve,reject};this.pending.set(job.id,job);
       try{this.ensureWindow();this.pump();}catch{this.fail(Error('Xbox party media could not start.'));}
     });
-    }finally{this.waiting--;this.options.settled?.();}
+    }finally{if(connecting)this.connecting=false;this.waiting--;this.options.settled?.();}
   }
   private ensureWindow():void{
     if(this.contents)return;

@@ -36,6 +36,7 @@ export class XboxGameGuide {
   constructor(private readonly options:Options){}
   get profileRequest():XboxProfileRequest|undefined{return this.profile?{...this.profile}:undefined;}
   get shown():boolean{return this.visible||this.wanted;}
+  get interactive():boolean{return this.visible&&this.wanted&&Boolean(this.game)&&this.options.enabled()&&this.session===this.options.account();}
   get bound():boolean{return Boolean(this.game);}
   bind(id:string,title:string):void{
     if(this.game?.id===id)return;

@@ -8,6 +8,8 @@ const methods=new Set([
   'getXboxPlayerProfile','getXboxProfileRequest','completeXboxProfileRequest','getXboxFriends',
   'getXboxInbox','getXboxConversation','sendXboxMessage','getXboxGameInviteAvailability','sendXboxGameInvite',
   'chooseGameInviteRecipient','cancelGameInvite','acceptGameInvite',
+  'getXboxParty','getXboxVoiceState','getXboxActiveParties','getXboxInvites',
+  'leaveExistingXboxParty','inviteXboxPartyFriend','controlXboxVoice',
   'closeXboxGuide',
 ]);
 const media:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.woff':'font/woff','.woff2':'font/woff2','.svg':'image/svg+xml','.png':'image/png'};

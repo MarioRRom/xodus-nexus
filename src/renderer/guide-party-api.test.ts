@@ -10,4 +10,11 @@ it('routes Guide party controls to the existing shared media owner without ownin
  guidePartyApi.onXboxPartyState(()=>{});guidePartyApi.onXboxVoiceState(()=>{});guidePartyApi.onXboxInvitesChanged(()=>{});
  expect(events.mock.calls.map(call=>call[0])).toEqual(['party','voice','invites']);
  expect(guidePartyApi).not.toHaveProperty('xboxVoiceHostReady');expect(guidePartyApi).not.toHaveProperty('acceptXboxGameInvite');
+ for(const name of ['xboxPartyStart','xboxPartyMicrophone','xboxPartyVoiceAllowed','publishXboxVoiceHostState','completeXboxVoiceHostCommand'])expect(guidePartyApi).not.toHaveProperty(name);
+});
+it('exposes read state and bounded explicit controls, without starting anything on subscription',async()=>{
+ guidePartyApi.onXboxPartyState(()=>{});guidePartyApi.onXboxVoiceState(()=>{});expect(rpc).not.toHaveBeenCalled();
+ await guidePartyApi.getXboxVoiceState();await guidePartyApi.getXboxActiveParties();await guidePartyApi.getXboxInvites();
+ await guidePartyApi.leaveExistingXboxParty('existing');await guidePartyApi.controlXboxVoice({type:'setMuted',muted:false});
+ expect(rpc.mock.calls).toEqual([['getXboxVoiceState'],['getXboxActiveParties'],['getXboxInvites'],['leaveExistingXboxParty','existing'],['controlXboxVoice',{type:'setMuted',muted:false}]]);
 });
