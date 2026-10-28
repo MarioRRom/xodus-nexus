@@ -210,6 +210,27 @@ test('game sign-in selects response types before persistence and propagates Sisu
   for (const filter of ['credential_', 'xbox_delegation_ticket_', 'hosted_signin_']) assert.ok(build.includes(`'${filter}'`));
 });
 
+test('device registration rejects failed or malformed bounded responses without panicking (#382)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entry = lock.patches.find(value => value.file === 'xodus-device-registration-response.patch');
+  assert.ok(entry);
+  const patch = await fs.readFile(`assets/${entry.file}`, 'utf8');
+  assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+  const files = [...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]).sort();
+  assert.deepEqual(files, ['crates/xodus/src/api/live/device_response_tests.rs', 'crates/xodus/src/api/live/mod.rs']);
+  for (const name of ['credential_device_response_accepts_complete_registration_without_rewriting_identity',
+    'credential_device_response_http_refusals_are_errors_not_panics_or_payload_logs',
+    'credential_device_response_rejects_malformed_incomplete_and_unsuccessful_payloads',
+    'credential_device_response_bounds_bodies_with_or_without_content_length']) assert.ok(patch.includes(name), name);
+  const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.ok(added.includes('response.error_for_status()?'));
+  assert.ok(added.includes('response.chunk().await?'));
+  assert.ok(added.includes('!parsed.success'));
+  const production = patch.split('diff --git a/crates/xodus/src/api/live/device_response_tests.rs')[0]
+    .split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+  assert.doesNotMatch(production, /\.expect\(|\.unwrap\(/);
+});
+
 test('auth response consistency and coherent credential persistence are pinned and account-free tested', async () => {
   const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
   assert.ok(lock.patches.some(p => p.file === 'xodus-auth-consistency.patch'));
