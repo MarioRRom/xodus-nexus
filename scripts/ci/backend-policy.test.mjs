@@ -28,6 +28,24 @@ test('manifest-selected plain package executables keep licensing and encrypted-l
   assert.doesNotMatch(added,/get_license|tokens\.|full_key|Command::|set_permissions|mount_mem_fd|\.unpack\(/);
 });
 
+test('plain-region metadata supplements launch images without replacing encrypted declarations (#417)', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const entries = ['xodus-plain-region-images.patch', 'xodus-plain-region-regressions.patch'];
+  for (const filename of entries) {
+    const entry = lock.patches.find(value => value.file === filename);
+    assert.ok(entry);
+    const patch = await fs.readFile(`assets/${filename}`, 'utf8');
+    assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+    assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(value => value[1]), ['crates/xodus-cli/src/commands/run.rs']);
+  }
+  assert.ok(lock.patches.findIndex(value => value.file === entries[1]) > lock.patches.findIndex(value => value.file === entries[0]));
+  const tests = await fs.readFile(`assets/${entries[1]}`, 'utf8');
+  for (const name of ['plain_region_metadata_declares_selected_executable_without_replacing_encrypted_files',
+    'plain_region_metadata_empty_read_preserves_all_existing_declarations',
+    'plain_region_metadata_keeps_path_signature_and_ambiguity_checks']) assert.ok(tests.includes(name), name);
+  assert.ok(tests.includes('!content.keep_encrypted && !known.contains'));
+});
+
 test('launch views require actual symbolic-link support and fall back only once (#341)',async()=>{
   const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
   const entry=lock.patches.find(value=>value.file==='xodus-launch-filesystem.patch');assert.ok(entry);
