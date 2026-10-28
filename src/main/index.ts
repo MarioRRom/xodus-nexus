@@ -37,6 +37,7 @@ import { gameLaunchArguments, preparedGameWine } from './game-launch.js';
 import { prepareGameWrapper, type GameWrapper } from './game-wrapper.js';
 import { normalizeLaunchTools } from '../shared/launch-tools.js';
 import { LauncherUpdater } from './launcher-update.js';
+import {XboxChatWindows} from './xbox-chat-windows.js';
 import { copyDiagnosticFile, diagnosticLogFile, readDiagnosticTail } from './diagnostic-log.js';
 import { BackendDiagnostics, backendDiagnostic, setBackendDiagnostics } from './backend-diagnostics.js';
 import { createDiagnosticReport, reportSystemInfo, saveDiagnosticReport, validateReportContent } from './diagnostic-report.js';
@@ -95,6 +96,7 @@ const nativeSocialKeepAlive:(()=>boolean)[]=[];
 function clearDesktopProfile(){desktopProfileRequest=undefined;mainWindow?.webContents.send('xbox-desktop-profile',undefined);}
 function availableNativeInvite(){return [...gameInviteBridges.values()].find(bridge=>bridge.state().active.length);}
 
+let chatWindows:XboxChatWindows;
 const nativeSocialSenders:((event:Electron.IpcMainInvokeEvent)=>boolean)[]=[];
 const nativeSocialResets:(()=>void)[]=[];
 const nativeSocialBeforeAuth:(()=>Promise<void>)[]=[];
@@ -1327,6 +1329,8 @@ function registerIpc(): void {
  ipcMain.handle('xbox-game-invite-availability',event=>{socialSender(event);const bridge=availableNativeInvite();return bridge?{canInvite:true,gameId:bridge.id,title:bridge.game}:{canInvite:false,reason:'Start an online game session to invite someone.'};});
  ipcMain.handle('xbox-game-invite-send',(event,xuid:string)=>{socialSender(event);const bridge=availableNativeInvite();if(!bridge)throw Error('Start an online game session to invite someone.');bridge.invite(xuid);});
 
+ ipcMain.handle('pop-out-xbox-chat',(event,xuid:unknown)=>{socialSender(event);return chatWindows.show(xuid);});
+ ipcMain.handle('close-xbox-chat',event=>{if(!chatWindows.owns(event))throw Error('Close the chat from its own window.');chatWindows.close(event.sender);});
   ipcMain.handle('xbox-player-details',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.details(xuid);});
   ipcMain.handle('xbox-player-games',(event,xuid:string)=>{socialSender(event);return xboxNativeSocial.games(xuid);});
   ipcMain.handle('xbox-social-people',(event,list:Parameters<NativeXboxSocial['people']>[0],query?:string)=>{socialSender(event);return xboxNativeSocial.people(list,query);});
@@ -1918,6 +1922,12 @@ app.whenReady().then(async () => {
   if (startupError) { dialog.showErrorBox(nativeText('Invalid Nexus shortcut'), startupError.message); app.quit(); return; }
   xboxNativeSocial=new NativeXboxSocial(nativeSocialConnection);
   nativeSocialResets.push(clearDesktopProfile);
+  chatWindows=new XboxChatWindows(__dirname,finishShortcutSession);
+  nativeSocialSenders.push(event=>chatWindows.owns(event));
+  nativeSocialResets.push(()=>chatWindows.shutdown());
+  nativeSocialShutdown.push(async()=>{chatWindows.shutdown();});
+  nativeSocialKeepAlive.push(()=>chatWindows.hasWindow);
+  nativeSocialSnapshots.push(()=>{for(const contents of chatWindows.contents)contents.send('snapshot',snapshot());});
   if (!demoMode) {
     backendDiagnostics = new BackendDiagnostics(app.getPath('userData'), () => ({
       launcher: app.getVersion(), backend: backend?.current.version, source: backend?.current.source,
