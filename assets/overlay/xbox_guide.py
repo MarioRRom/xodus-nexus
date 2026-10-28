@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Local Nexus Guide UI using a layer surface or a standard desktop window.
+"""Local Nexus Overlay UI using a layer surface or a standard desktop window.
 
 First stdin line: {url, token, monitor:{x,y,width,height}}. Further lines are
 show/hide/quit, or {"command":...}. Stdout contains safe lifecycle events only.
@@ -81,7 +81,7 @@ def run(config):
         GtkLayerShell = None
 
     GLib.set_prgname("xodus-xbox-guide")
-    GLib.set_application_name("Nexus Guide")
+    GLib.set_application_name("Nexus Overlay")
     initialized, _ = Gtk.init_check([])
     if not initialized:
         raise GuideError("desktop-display-unavailable")
@@ -100,7 +100,7 @@ def run(config):
             self.input = b""
             self.origin = config["url"].rsplit("/", 1)[0]
             self.window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-            self.window.set_title("Nexus Guide")
+            self.window.set_title("Nexus Overlay")
             self.window.set_decorated(False)
             self.window.set_skip_taskbar_hint(True)
             self.window.set_skip_pager_hint(True)

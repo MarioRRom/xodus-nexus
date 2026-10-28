@@ -19,7 +19,7 @@ export class XboxGuideParty {
   if(!this.handles(method))throw Error('Unsupported Guide party action.');
   const mutation=mutations.has(method);
   if(args.length!==(mutation?1:0))throw Error('Invalid Guide party request.');
-  if(mutation&&!this.options.interactive())throw Error('Open the Guide to use Xbox party controls.');
+  if(mutation&&!this.options.interactive())throw Error('Open the Overlay to use Xbox party controls.');
   const text=()=>{if(typeof args[0]!=='string')throw Error('Invalid Guide party request.');return args[0];};
   switch(method){
    case 'getXboxParty':return this.options.party.current;

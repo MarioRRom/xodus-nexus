@@ -18,7 +18,7 @@ function XboxGameGuide(){
  useInterfaceLanguage(language);
  const [runtimeInvites,setRuntimeInvites]=useState<GameInviteState>(emptyGameInvites);
  const runtimeApi=useMemo<RuntimeInviteApi>(()=>({chooseGameInviteRecipient:(id,xuid)=>guideRpc('chooseGameInviteRecipient',id,xuid),cancelGameInvite:id=>guideRpc('cancelGameInvite',id),acceptGameInvite:id=>guideRpc('acceptGameInvite',id)}),[]);
- const [auth,setAuth]=useState<AuthStatus>({running:true,stored:null,note:'Connecting Nexus Guide…'});
+ const [auth,setAuth]=useState<AuthStatus>({running:true,stored:null,note:'Connecting Nexus Overlay…'});
  const [problem,setProblem]=useState<string>(),[expanded,setExpanded]=useState(false),[profile,setProfile]=useState<XboxProfileRequest>();
  const [overlay,setOverlay]=useState(()=>xboxOverlaySettings({}));
  const [chats,setChats]=useState<string[]>([]),chatIds=useRef<string[]>([]),navigation=useRef(0);

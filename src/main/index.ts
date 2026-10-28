@@ -2069,7 +2069,7 @@ async function createWindow(): Promise<void> {
     if (windowState?.maximized || tooLarge) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
-  const restoreOverlayShortcut=()=>{void overlayShortcut?.record(store.settings,false).catch(()=>console.error('Could not restore the Guide shortcut.'));};
+  const restoreOverlayShortcut=()=>{void overlayShortcut?.record(store.settings,false).catch(()=>console.error('Could not restore the Overlay shortcut.'));};
   mainWindow.on('blur',restoreOverlayShortcut);
   mainWindow.on('closed',restoreOverlayShortcut);
   mainWindow.webContents.on('render-process-gone',restoreOverlayShortcut);
@@ -2268,7 +2268,7 @@ app.whenReady().then(async () => {
    // Only a single-display/legacy fallback. The host locates the game's window
    // by its launch process group, never the unsupported Wayland cursor position.
    monitor:()=>screen.getPrimaryDisplay().bounds,
-   problem:message=>{if(Notification.isSupported())new Notification({title:nativeText('Nexus Guide'),body:nativeText(message)}).show();},
+   problem:message=>{if(Notification.isSupported())new Notification({title:nativeText('Nexus Overlay'),body:nativeText(message)}).show();},
    invoke:async(method,args)=>{
     if(guideParty.handles(method))return guideParty.invoke(method,args);
     const text=(index:number)=>{const value=args[index];if(typeof value!=='string')throw Error('Invalid Guide request.');return value;};
