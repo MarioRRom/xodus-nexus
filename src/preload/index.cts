@@ -41,6 +41,39 @@ const api: LauncherApi = {
   getXboxConversation: xuid => ipcRenderer.invoke('xbox-conversation', xuid),
   sendXboxMessage: (xuid, text) => ipcRenderer.invoke('xbox-send-message', xuid, text),
   closeXboxSocial: () => ipcRenderer.invoke('xbox-social-close'),
+  getXboxVoiceState:()=>ipcRenderer.invoke('xbox-voice-state'),
+  controlXboxVoice:command=>ipcRenderer.invoke('xbox-voice-control',command),
+  onXboxVoiceState:callback=>{
+    const listener=(_event:Electron.IpcRendererEvent,state:Parameters<typeof callback>[0])=>callback(state);
+    ipcRenderer.on('xbox-voice-state',listener);return()=>ipcRenderer.removeListener('xbox-voice-state',listener);
+  },
+  xboxVoiceHostReady:()=>ipcRenderer.invoke('xbox-voice-owner-ready'),
+  publishXboxVoiceHostState:state=>ipcRenderer.invoke('xbox-voice-owner-state',state),
+  completeXboxVoiceHostCommand:(id,error)=>ipcRenderer.invoke('xbox-voice-owner-complete',id,error),
+  onXboxVoiceHostCommand:callback=>{
+    const listener=(_event:Electron.IpcRendererEvent,request:Parameters<typeof callback>[0])=>callback(request);
+    ipcRenderer.on('xbox-voice-owner-command',listener);return()=>ipcRenderer.removeListener('xbox-voice-owner-command',listener);
+  },
+  getXboxParty: () => ipcRenderer.invoke('xbox-party-state'),
+  startXboxParty: (offer,partyId) => ipcRenderer.invoke('xbox-party-start',offer,partyId),
+  getXboxActiveParties: () => ipcRenderer.invoke('xbox-party-active'),
+  leaveExistingXboxParty: id => ipcRenderer.invoke('xbox-party-leave-existing',id),
+  confirmXboxParty: id => ipcRenderer.invoke('xbox-party-connected',id),
+  leaveXboxParty: () => ipcRenderer.invoke('xbox-party-leave'),
+  inviteXboxPartyFriend: xuid => ipcRenderer.invoke('xbox-party-invite',xuid),
+  xboxVoiceAllowed: xuid => ipcRenderer.invoke('xbox-party-voice-policy',xuid),
+  allowXboxMicrophone: () => ipcRenderer.invoke('xbox-party-microphone'),
+  onXboxPartyState: callback => {
+    const listener=(_event:Electron.IpcRendererEvent,state:Parameters<typeof callback>[0])=>callback(state);
+    ipcRenderer.on('xbox-party-state',listener);
+    return ()=>ipcRenderer.removeListener('xbox-party-state',listener);
+  },
+  getXboxInvites: () => ipcRenderer.invoke('xbox-invites'),
+  acceptXboxPartyInvite: (offer,id) => ipcRenderer.invoke('xbox-party-accept',offer,id),
+  onXboxInvitesChanged: callback => {
+    const listener=(_event:Electron.IpcRendererEvent,invites:Parameters<typeof callback>[0])=>callback(invites);
+    ipcRenderer.on('xbox-invites',listener);return()=>ipcRenderer.removeListener('xbox-invites',listener);
+  },
   getSnapshot: () => ipcRenderer.invoke('get-snapshot'),
   refreshBackend: () => ipcRenderer.invoke('backend-refresh'),
   checkBackendUpdate: () => ipcRenderer.invoke('backend-check-update'),
