@@ -6,6 +6,35 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import os from 'node:os';
+test('download and update throughput optimizations preserve bounded writes and durable recovery', async () => {
+  const lock = JSON.parse(await fs.readFile('assets/backend-source.lock.json', 'utf8'));
+  const paths = [
+    ['xodus-download-throughput.patch', ['crates/msixvc/src/download_throughput_tests.rs', 'crates/msixvc/src/encrypted_image_tests.rs', 'crates/msixvc/src/xvd.rs']],
+    ['xodus-update-throughput.patch', ['crates/xodus-cli/src/commands/streaming.rs', 'crates/xodus-cli/src/commands/streaming_update.rs', 'crates/xodus-cli/src/commands/streaming_update_throughput_tests.rs']],
+  ];
+  for (const [file, expected] of paths) {
+    const entry = lock.patches.find(p => p.file === file); assert.ok(entry);
+    const patch = await fs.readFile('assets/' + file, 'utf8');
+    assert.equal(createHash('sha256').update(patch).digest('hex'), entry.sha256);
+    assert.deepEqual([...patch.matchAll(/^diff --git a\/(\S+) b\/\S+$/gm)].map(m => m[1]), expected);
+    const added = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n');
+    assert.doesNotMatch(added, /\.sync_all\(\).*ok\(\)|set_limit_kib\(0\)|remove_file\(.*INCOMPLETE|get_license|\.post\(|\.delete\(/);
+    assert.ok(lock.patches.findIndex(p => p.file === file) > lock.patches.findIndex(p => p.file === 'xodus-incremental-update-safety.patch'));
+  }
+  const batch = await fs.readFile('assets/xodus-download-throughput.patch', 'utf8');
+  assert.match(batch, /const WRITE_BATCH: usize = 256 \* 1024/);
+  assert.ok(batch.includes('streaming_throughput_batches_page_writes_without_changing_plain_bytes_or_short_writes'));
+  assert.ok(batch.includes('streaming_throughput_decrypts_large_batches_with_exact_unpadded_plaintext'));
+  const update = await fs.readFile('assets/xodus-update-throughput.patch', 'utf8');
+  for (const name of ['streaming_update_throughput_prefers_same_position_and_reads_contiguous_pages_once',
+    'streaming_update_throughput_ranges_cover_all_gaps_once_with_bounded_memory',
+    'streaming_update_throughput_parallel_ranges_preserve_plain_and_ciphertext_tails',
+    'streaming_update_throughput_failed_window_resumes_only_durable_contiguous_output',
+    'streaming_update_throughput_pause_and_cancellation_never_claim_prefetched_bytes']) assert.ok(update.includes(name));
+  assert.match(update, /buffer_unordered\(parallel.clamp\(1, 8\)\)/);
+  assert.ok(update.includes('Memory is not a durable file checkpoint.'));
+  assert.ok(update.includes('checkpoint(offset)?'));
+});
 test('native inbox is nonblocking and conversation validation retains account and safety gates (#408)',async()=>{
  const lock=JSON.parse(await fs.readFile('assets/backend-source.lock.json','utf8'));
  const entry=lock.patches.find(p=>p.file==='xodus-native-social-safety.patch');assert.ok(entry);

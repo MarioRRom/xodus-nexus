@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Improve game download and update performance with batched writes, parallel update transfers and fewer repeated local reads.
 - Add a redesigned Social panel with conversations, player profiles and friend management. Thanks @Rbanh.
 - Show unread conversations and game updates in a notification bell beside the account, and open chats at the latest message.
 - Reduce disk space and downloads for game updates by reusing verified local data, and support recovery of interrupted updates. Thanks @Rbanh.
