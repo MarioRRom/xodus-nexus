@@ -30,6 +30,11 @@ export class XboxChatWindows {
   owns(event:Pick<Electron.IpcMainInvokeEvent,'sender'|'senderFrame'>):boolean{
     return this.contents.some(contents=>event.sender===contents&&event.senderFrame===contents.mainFrame);
   }
+  canView(event:Pick<Electron.IpcMainInvokeEvent,'sender'|'senderFrame'>,peer:unknown):boolean{
+    if(typeof peer!=='string'||!this.owns(event))return false;
+    const window=this.windows.get(peer)?.window;
+    return Boolean(window&&!window.isDestroyed()&&window.webContents===event.sender&&window.isVisible()&&!window.isMinimized()&&window.isFocused());
+  }
 
   async show(value:unknown):Promise<void>{
     const xuid=xboxChatTarget(value),url=rendererUrl(this.directory,xuid);

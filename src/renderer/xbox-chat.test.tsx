@@ -2,9 +2,22 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {expect,it,vi} from 'vitest';
 import type {XboxMessage,XboxMessageReceipt,XboxPlayerProfile,XboxSocialApi} from '../shared/types';
-import {XboxChat,XboxChatSession,xboxChatCanSend,xboxChatComposeKey,type XboxChatState} from './XboxChat';
+import {XboxChat,XboxChatSession,xboxChatCanSend,xboxChatComposeKey,watchXboxChatFocus,type XboxChatState} from './XboxChat';
 
 const message=(id:string,text=id):XboxMessage=>({id,text,sender:'2',mine:false,hidden:false,timestamp:'2026-10-23T12:34:56Z'});
+it('coalesces focus/restore observation after paint and cancels it when the chat changes or closes',()=>{
+ const target=new EventTarget(),doc=new EventTarget(),frames=new Map<number,FrameRequestCallback>();let next=0;
+ const observe=vi.fn(),cancel=vi.fn((id:number)=>frames.delete(id));
+ vi.stubGlobal('window',Object.assign(target,{requestAnimationFrame:(callback:FrameRequestCallback)=>{const id=++next;frames.set(id,callback);return id;},cancelAnimationFrame:cancel}));
+ vi.stubGlobal('document',doc);
+ try{
+  const dispose=watchXboxChatFocus(observe);expect(observe).not.toHaveBeenCalled();expect(frames.size).toBe(1);
+  target.dispatchEvent(new Event('focus'));doc.dispatchEvent(new Event('visibilitychange'));expect(frames.size).toBe(1);expect(cancel).toHaveBeenCalledTimes(2);
+  const [id,callback]=[...frames.entries()][0];frames.delete(id);callback(0);expect(observe).toHaveBeenCalledOnce();
+  target.dispatchEvent(new Event('focus'));dispose();expect(frames.size).toBe(0);
+  target.dispatchEvent(new Event('focus'));doc.dispatchEvent(new Event('visibilitychange'));expect(frames.size).toBe(0);expect(observe).toHaveBeenCalledOnce();
+ }finally{vi.unstubAllGlobals();}
+});
 it('queues conversation history before its optional player profile',async()=>{
  const f=fixture(),order:string[]=[];
  f.api.getXboxConversation.mockImplementation(async()=>{order.push('history');return [];});

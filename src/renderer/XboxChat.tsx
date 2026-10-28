@@ -18,6 +18,17 @@ export function xboxChatComposeKey(event:KeyboardEvent<HTMLTextAreaElement>):voi
  if(!event.repeat)event.currentTarget.form?.requestSubmit();
 }
 
+/** Native focus/restore and DOM visibility settle before the next paint. */
+export function watchXboxChatFocus(observe:()=>void):()=>void{
+ let frame:number|undefined;
+ const focus=()=>{
+  if(frame!==undefined)window.cancelAnimationFrame(frame);
+  frame=window.requestAnimationFrame(()=>{frame=undefined;observe();});
+ };
+ window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);focus();
+ return()=>{if(frame!==undefined)window.cancelAnimationFrame(frame);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
+}
+
 /** One immutable account/recipient; discarded reads and writes can never publish into its replacement. */
 export class XboxChatSession {
  private state=empty();
@@ -115,10 +126,7 @@ function XboxChatView({api,account,xuid,displayName,close,popOut,openProfile,act
   observe();
  },[state.messages,state.sent,active]);
  useEffect(()=>{if(active)void session.current?.refresh('poll');},[active]);
- useEffect(()=>{
-  const focus=()=>observe();window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
-  return()=>{window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
- },[active,state.messages]);
+ useEffect(()=>watchXboxChatFocus(observe),[active,state.messages]);
  const name=state.profile?.gamertag??displayName??'Xbox player';
  const valid=xboxChatCanSend(state.draft),count=[...state.draft].length;
  return <section className="social-chat" aria-label={'Chat with '+name} style={{display:'flex',flexDirection:'column',flex:1,minWidth:0,minHeight:0,height:'100%',overflow:'hidden'}}>

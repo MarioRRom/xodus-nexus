@@ -23,13 +23,27 @@ export function useNotifications(data:AppSnapshot) {
     setReads({identity,keys});lastViewed.current={identity,keys:[]};setFailed(false);
   },[identity,storageKey]);
   const remember=(keys:string[])=>{
-    if(!storageKey)return;
+    if(!storageKey||currentIdentity.current!==identity)return;
     setReads(previous=>{
+      if(currentIdentity.current!==identity)return previous;
       const value=rememberNotices(previous.identity===identity?previous.keys:[],keys);
+      if(previous.identity===identity&&value.length===previous.keys.length&&value.every((key,index)=>key===previous.keys[index]))return previous;
       try{localStorage.setItem(storageKey,JSON.stringify(value));}catch{/* Keep this session's acknowledgements even if persistence fails. */}
       return {identity,keys:value};
     });
   };
+  useEffect(()=>{
+    if(!supported)return;
+    let active=true;
+    const receive=(state:Awaited<ReturnType<typeof window.launcher.getXboxChatReads>>)=>{
+      if(active&&currentIdentity.current===identity&&state&&state.account===data.auth.username&&state.binary===data.backend.binaryPath)
+        remember(parseNotificationReads(JSON.stringify(state.keys)));
+    };
+    const unsubscribe=window.launcher.onXboxChatReads(receive);
+    // The broker retains exact IDs if the main window was closed while a chat stayed open.
+    void window.launcher.getXboxChatReads().then(receive,()=>{});
+    return()=>{active=false;unsubscribe();};
+  },[identity,supported]);
   useEffect(()=>{
     if(!supported)return;
     let active=true;
@@ -73,6 +87,8 @@ export function useNotifications(data:AppSnapshot) {
     viewed:(peer:string,ids:string[])=>{
       const keys=ids.map(id=>messageNoticeKey(peer,id));
       lastViewed.current={identity,keys};remember(keys);
+      if(supported&&data.auth.username&&data.backend.binaryPath)
+        void window.launcher.viewedXboxChat(data.auth.username,data.backend.binaryPath,peer,ids).catch(()=>{/* Local read state is still retained. */});
     }};
 }
 

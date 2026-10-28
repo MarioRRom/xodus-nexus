@@ -2,14 +2,15 @@ import {beforeEach,expect,it,vi} from 'vitest';
 
 const h=vi.hoisted(()=>({windows:[] as any[],load:vi.fn<(...args:any[])=>Promise<void>>()}));
 vi.mock('electron',()=>({BrowserWindow:class{
-  options:any;destroyed=false;minimized=false;url='';
+  options:any;destroyed=false;minimized=false;visible=false;focused=false;url='';
   handlers=new Map<string,Function>();webHandlers=new Map<string,Function>();
   webContents={mainFrame:{},getURL:()=>this.url,setWindowOpenHandler:vi.fn(),
     on:(event:string,callback:Function)=>this.webHandlers.set(event,callback),
     session:{setPermissionCheckHandler:vi.fn(),setPermissionRequestHandler:vi.fn()}};
   loadURL=vi.fn((url:string)=>{this.url=url;return h.load(url,this);});
-  show=vi.fn();focus=vi.fn();restore=vi.fn(()=>{this.minimized=false;});setTitle=vi.fn();
+  show=vi.fn(()=>{this.visible=true;});focus=vi.fn(()=>{this.focused=true;});restore=vi.fn(()=>{this.minimized=false;});setTitle=vi.fn();
   isDestroyed=()=>this.destroyed;isMinimized=()=>this.minimized;
+  isVisible=()=>this.visible;isFocused=()=>this.focused;
   on=(event:string,callback:Function)=>this.handlers.set(event,callback);
   close=vi.fn(()=>{if(this.destroyed)return;this.destroyed=true;this.handlers.get('closed')?.();});
   destroy=vi.fn(()=>{if(this.destroyed)return;this.destroyed=true;this.handlers.get('closed')?.();});
@@ -72,6 +73,18 @@ it('blocks navigation, redirects, popups, media and other permission requests',a
   expect(w.webContents.session.setPermissionCheckHandler.mock.calls[0][0](w.webContents,'media','file://',{mediaType:'audio'})).toBe(false);
   const answer=vi.fn();w.webContents.session.setPermissionRequestHandler.mock.calls[0][0](w.webContents,'media',answer,{isMainFrame:true,mediaTypes:['audio']});expect(answer).toHaveBeenCalledWith(false);
   const preventDefault=vi.fn();w.webHandlers.get('page-title-updated')({preventDefault});expect(preventDefault).toHaveBeenCalledOnce();expect(w.setTitle).toHaveBeenCalledWith('Nexus Chat');
+});
+
+it('acknowledges only the focused visible recipient window, never another peer or a subframe',async()=>{
+  const chats=new XboxChatWindows('/app/dist-electron/main',vi.fn());await chats.show('1');await chats.show('2');
+  const w=h.windows[0],event={sender:w.webContents,senderFrame:w.webContents.mainFrame};
+  expect(chats.canView(event,'1')).toBe(true);expect(chats.canView(event,'2')).toBe(false);
+  expect(chats.canView({...event,senderFrame:{} as any},'1')).toBe(false);
+  expect(chats.canView(event,1)).toBe(false);
+  w.focused=false;expect(chats.canView(event,'1')).toBe(false);w.focused=true;
+  w.visible=false;expect(chats.canView(event,'1')).toBe(false);w.visible=true;
+  w.minimized=true;expect(chats.canView(event,'1')).toBe(false);w.minimized=false;
+  chats.close(w.webContents);expect(chats.canView(event,'1')).toBe(false);
 });
 
 it('permits only a vetted loopback development URL and keeps query data out of the route',async()=>{

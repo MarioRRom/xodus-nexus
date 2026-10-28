@@ -429,8 +429,12 @@ export interface XboxSocialApi {
 export interface XboxMessageReceipt {id:string}
 
 export interface XboxGameInviteAvailability {canInvite:boolean;gameId?:string;title?:string;reason?:string}
+export interface XboxChatReadState {account:string;binary:string;keys:string[]}
 export interface LauncherApi {
  closeXboxChat():Promise<void>;
+ getXboxChatReads():Promise<XboxChatReadState|undefined>;
+ onXboxChatReads(callback:(state:XboxChatReadState)=>void):()=>void;
+ viewedXboxChat(account:string,binary:string,peer:string,ids:string[]):Promise<void>;
  getXboxDesktopProfile():Promise<XboxProfileRequest|undefined>;
  onXboxDesktopProfile(callback:(request:XboxProfileRequest|undefined)=>void):()=>void;
 
