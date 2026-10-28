@@ -1,7 +1,7 @@
 import type {XboxProfileRequest} from '../shared/types.js';
 import {XboxSocial as NativeXboxSocial} from './xbox-native-social.js';
 import {resetSocialTransport} from './xbox-social-transport.js';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, powerSaveBlocker, screen, shell } from 'electron';
 import { constants, createWriteStream, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,6 +18,9 @@ import { DownloadBandwidthControls, isBandwidthOnlyPatch } from './download-band
 import { isShaderCacheOnlyPatch, shaderCacheLimits } from '../shared/shader-cache.js';
 import { demoAccountLibrary, demoAccountProducts, demoDownloads, demoGames, demoLaunchOptions, demoLocales, demoSnapshot, type DemoArtwork } from '../shared/demo-data.js';
 import { backendLock } from './backend-package.js';
+import {XboxGameGuide} from './xbox-game-guide.js';
+import {XboxOverlayShortcut,ensureOverlayDesktopEntry} from './xbox-overlay-shortcut.js';
+import {xboxOverlaySettings,xboxOverlayPatch} from '../shared/xbox-overlay-settings.js';
 import { BackendManager } from './backend.js';
 import { run, spawnTracked } from './process.js';
 import { inspectGameDirectory, StateStore } from './store.js';
@@ -99,6 +102,12 @@ let xboxNativeSocial:NativeXboxSocial;
 let desktopProfileRequest:XboxProfileRequest|undefined;
 const nativeSocialKeepAlive:(()=>boolean)[]=[];
 function clearDesktopProfile(){desktopProfileRequest=undefined;mainWindow?.webContents.send('xbox-desktop-profile',undefined);}
+function runtimeInvitation(id:unknown){
+ if(typeof id!=='string'||id.length>160)throw Error('Invalid invitation.');
+ const bridge=[...gameInviteBridges.values()].find(value=>id.startsWith(value.id+':'));
+ if(!bridge)throw Error('The game is no longer running.');return {bridge,id};
+}
+function guideAuth():AuthStatus{return{running:authState.running,stored:authState.stored,username:authState.stored?'current':undefined,gamertag:accountProfile?.value?.gamertag,avatarDataUrl:accountProfile?.value?.avatarDataUrl,note:''};}
 function availableNativeInvite(){return [...gameInviteBridges.values()].find(bridge=>bridge.state().active.length);}
 
 let chatWindows:XboxChatWindows;
@@ -113,6 +122,8 @@ let voiceHost:XboxVoiceHost;
 let currentXboxInvites:XboxInvite[]=[];
 const nativeSocialBeforeAuth:(()=>Promise<void>)[]=[];
 const nativeSocialShutdown:(()=>Promise<void>)[]=[];
+let gameGuide:XboxGameGuide;
+let overlayShortcut:XboxOverlayShortcut|undefined;
 const nativeSocialSnapshots:(()=>void)[]=[];
 function nativeSocialConnection(){
  const status=backend?.current;
@@ -270,6 +281,7 @@ function snapshot(): AppSnapshot {
     auth: structuredClone({ ...authState, gamertag: accountProfile?.value?.gamertag, avatarDataUrl: accountProfile?.value?.avatarDataUrl, subscription: accountProfile?.value?.subscription }),
     launcherUpdate: structuredClone(launcherUpdater.state),
     gameUpdates: structuredClone(gameUpdates),
+    overlayShortcut:overlayShortcut?.current,
     downloadProgressSupported: Boolean(backend.current.capabilities.streamingProgressJson),
     gameOperation: gameOperation ? structuredClone(gameOperation) : undefined,
     social: combinedInviteState(gameInviteBridges.values()),
@@ -1061,6 +1073,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
     }, { stopPrefix: protonRunner?.stopPrefix });
     operations.set(operationId, tracked.child);
     gameProcesses.set(operationId, tracked);
+    gameGuide?.bind(id,game.title);
     releaseDisplay = gameDisplay.acquire();
     gameOperation.status = 'running';
     gameOperation.phase = 'Xodus is running; waiting for the game window…';
@@ -1087,7 +1100,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       gameOperation.phase = gameOperation.error;
       gameOperation.finishedAt = new Date().toISOString();
     }).finally(async () => {
-      releaseDisplay();
+      releaseDisplay();gameGuide?.unbind(id);
       finalizingGame = true;
       try {
         operations.delete(operationId);
@@ -1106,7 +1119,7 @@ async function prepareGameLaunch(id: string): Promise<void> {
       } finally { finalizingGame = false; finishShortcutSession(); }
     });
   } catch (error) {
-    releaseDisplay();
+    releaseDisplay();gameGuide?.unbind(id);
     await inviteBridge?.stop().catch(()=>{});gameInviteBridges.delete(operationId);
     await launchWrapper?.cleanup().catch(() => undefined);
     if (serviceSession) {
@@ -1356,6 +1369,12 @@ async function acceptPartyInvite(event:Electron.IpcMainInvokeEvent,offer:string,
  return xboxParty.accept(offer,handle);
 }
 function registerIpc(): void {
+  ipcMain.handle('xbox-overlay-recording',async(event,recording:unknown)=>{
+    if(event.sender!==mainWindow?.webContents||event.senderFrame!==event.sender.mainFrame||typeof recording!=='boolean')throw Error('Invalid shortcut recording request.');
+    if(recording&&!mainWindow?.isFocused())throw Error('Focus Nexus to record a shortcut.');
+    await overlayShortcut?.record(store.settings,recording);
+  });
+
   ipcMain.handle('open-xbox-player-profile',async(event,value:unknown)=>{
     socialSender(event);
     if(typeof value!=='string'||value!=='me'&&(!/^[1-9][0-9]{0,19}$/.test(value)||BigInt(value)>18446744073709551615n))throw Error('Invalid Xbox player profile.');
@@ -1741,6 +1760,7 @@ function registerIpc(): void {
     }
     if ((['market', 'winePath', 'externalXodusRoot', 'runtimeRoot'] as const).some(key => patch[key] !== undefined && patch[key] !== store.settings[key])) ensureIdle();
     const allowed: Partial<Settings> = {};
+    Object.assign(allowed,xboxOverlayPatch(patch));
     if (patch.interfaceLanguage !== undefined) {
       if (interfaceLanguagePreference(patch.interfaceLanguage) !== patch.interfaceLanguage) throw Error('Invalid interface language.');
       allowed.interfaceLanguage = patch.interfaceLanguage;
@@ -1757,6 +1777,10 @@ function registerIpc(): void {
     if (typeof patch.firstRunCompleted === 'boolean') allowed.firstRunCompleted = patch.firstRunCompleted;
     const previous = store.settings;
     const settings = await store.setSettings(allowed);
+    if(Object.keys(xboxOverlayPatch(patch)).length){
+      await overlayShortcut?.configure(settings);gameGuide?.publish('overlay',xboxOverlaySettings(settings));
+      if(Object.keys(patch).every(key=>['overlayEnabled','overlayShortcut','overlaySide'].includes(key))){emitSnapshot();return settings;}
+    }
     if (patch.downloadLimitMiB !== undefined) {
       try { await downloadLimitControls.apply(settings.downloadLimitMiB ?? 0); }
       catch { emitSnapshot(); throw Error('The speed limit was saved, but could not be sent to the active download. Retry the installation to apply it.'); }
@@ -1907,6 +1931,10 @@ async function createWindow(): Promise<void> {
     if (windowState?.maximized || tooLarge) mainWindow.maximize();
     mainWindow.on('close', () => { if (mainWindow) saveWindowState(mainWindow); });
   }
+  const restoreOverlayShortcut=()=>{void overlayShortcut?.record(store.settings,false).catch(()=>console.error('Could not restore the Guide shortcut.'));};
+  mainWindow.on('blur',restoreOverlayShortcut);
+  mainWindow.on('closed',restoreOverlayShortcut);
+  mainWindow.webContents.on('render-process-gone',restoreOverlayShortcut);
   mainWindow.on('closed', () => { mainWindow = null; finishShortcutSession(); });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void openDesktopTarget(url, () => shell.openExternal(url))
@@ -2081,6 +2109,46 @@ app.whenReady().then(async () => {
   void enrichDownloadCovers(store.downloads, currentMarket()).catch(() => { /* Covers are optional. */ });
   void checkLauncherUpdate().then(() => emitSnapshot());
   registerIpc();
+
+  const guideInitial=()=>({auth:guideAuth(),profile:gameGuide?.profileRequest,overlay:xboxOverlaySettings(store.settings),runtimeInvites:combinedInviteState(gameInviteBridges.values())});
+  gameGuide=new XboxGameGuide({directory:path.join(__dirname,'..','..','dist'),
+   helper:app.isPackaged?path.join(process.resourcesPath,'overlay','xbox_guide.py'):path.join(__dirname,'..','..','assets','overlay','xbox_guide.py'),
+   account:()=>nativeSocialConnection()?.account,initial:guideInitial,
+   enabled:()=>xboxOverlaySettings(store.settings).overlayEnabled,
+   legacyShortcutOwned:()=>gameGuide.bound&&overlayShortcut?.current.state==='registered'&&xboxOverlaySettings(store.settings).overlayShortcut==='Super+G',
+   monitor:()=>screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds,
+   problem:message=>{if(Notification.isSupported())new Notification({title:'Nexus Guide',body:message}).show();},
+   invoke:async(method,args)=>{
+    const text=(index:number)=>{const value=args[index];if(typeof value!=='string')throw Error('Invalid Guide request.');return value;};
+    switch(method){
+     case 'getXboxPlayerDetails':return xboxNativeSocial.details(text(0));
+     case 'getXboxPlayerGames':return xboxNativeSocial.games(text(0));
+     case 'getXboxPeople':return xboxNativeSocial.people(text(0) as Parameters<NativeXboxSocial['people']>[0],args[1]===undefined||args[1]===null?undefined:text(1));
+     case 'getXboxRelationship':return xboxNativeSocial.relationship(text(0));
+     case 'changeXboxRelationship':if(text(0)!=='current')throw Error('Xbox account changed.');return xboxNativeSocial.changeRelationship(nativeSocialConnection()!.account,text(1),text(2) as Parameters<NativeXboxSocial['changeRelationship']>[2]);
+     case 'getXboxPlayerProfile':return xboxNativeSocial.profile(text(0));
+     case 'getXboxFriends':return xboxNativeSocial.friends();
+     case 'getXboxInbox':return xboxNativeSocial.inbox();
+     case 'getXboxConversation':return xboxNativeSocial.conversation(text(0));
+     case 'sendXboxMessage':if(text(0)!=='current')throw Error('Xbox account changed.');return xboxNativeSocial.send(nativeSocialConnection()!.account,text(1),text(2));
+     case 'getXboxGameInviteAvailability':{const bridge=availableNativeInvite();return bridge?{canInvite:true,gameId:bridge.id,title:bridge.game}:{canInvite:false,reason:'Start an online game session to invite someone.'};}
+     case 'sendXboxGameInvite':{const bridge=availableNativeInvite();if(!bridge)throw Error('Start an online game session to invite someone.');return bridge.invite(text(0));}
+     case 'chooseGameInviteRecipient':{const value=runtimeInvitation(text(0));return value.bridge.choose(value.id,text(1));}
+     case 'cancelGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.cancel(value.id);}
+     case 'acceptGameInvite':{const value=runtimeInvitation(text(0));return value.bridge.accept(value.id);}
+     default:throw Error('Unsupported Guide action.');
+    }
+   },
+  });
+  nativeSocialResets.push(()=>gameGuide.reset());
+  nativeSocialSnapshots.push(()=>{gameGuide.publish('auth',guideAuth());gameGuide.publish('runtimeInvites',combinedInviteState(gameInviteBridges.values()));});
+  nativeSocialShutdown.push(async()=>{await overlayShortcut?.shutdown();await gameGuide.shutdown();});
+  if(!demoMode){
+   if(app.isPackaged&&process.env.APPIMAGE)await ensureOverlayDesktopEntry(process.env.APPIMAGE).catch(()=>console.error('Nexus desktop shortcut identity unavailable.'));
+   overlayShortcut=new XboxOverlayShortcut(globalShortcut,()=>gameGuide.toggle(),emitSnapshot,{profileDirectory:app.getPath('userData')});
+   await overlayShortcut.configure(store.settings);
+  }
+  try{await gameGuide.startControl(path.join(process.env.XDG_RUNTIME_DIR??`/run/user/${process.getuid?.()}`,'xodus-nexus-guide.sock'));}catch{console.error('Nexus Guide shortcut control unavailable.');}
   launchReady = true;
   if (startupRequest.gameId) {
     await prepareSystemWallet();

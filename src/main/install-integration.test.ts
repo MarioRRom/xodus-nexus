@@ -47,6 +47,7 @@ vi.mock('electron', () => ({
   BrowserWindow: class { webContents = { on: vi.fn(), send: vi.fn(), setWindowOpenHandler: vi.fn() };
     on() {} once() {} show() {} focus() {} maximize = h.maximize; isDestroyed() { return false; } async loadFile() {} },
   screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }) },
+  globalShortcut:{register:vi.fn(()=>false),unregister:vi.fn()},
   dialog: { showMessageBox: h.showMessage, showSaveDialog: h.showSave }, nativeImage: {}, shell: { trashItem: h.trash }, powerSaveBlocker: { start: h.blockDisplay, stop: h.releaseDisplay },
 }));
 vi.mock('./backend.js', () => ({ LINUX_RUN_PATCH: 'test-patch', BackendManager: class {
@@ -56,6 +57,9 @@ vi.mock('./runtime.js', () => ({ RuntimeManager: class { get current() { return 
 vi.mock('./catalog.js', () => ({ CatalogService: class { async artwork() { return new Map(); } posters = h.posters; } }));
 vi.mock('./account-profile.js', () => ({ AccountProfile: class { async select() {} cancel() {} } }));
 vi.mock('./launcher-update.js', () => ({ LauncherUpdater: class { state = {}; async initialize() {} async check() {} cancel() {} } }));
+// Keep download integration fixtures isolated from the real compositor and shortcut portal.
+vi.mock('./xbox-game-guide.js',()=>({XboxGameGuide:class {reset(){} bind(){} unbind(){} publish(){} async startControl(){} async shutdown(){}}}));
+vi.mock('./xbox-overlay-shortcut.js',()=>({ensureOverlayDesktopEntry:async()=>{},XboxOverlayShortcut:class {current={state:'disabled'};async configure(){}async shutdown(){}}}));
 vi.mock('./launcher-fonts.js', () => ({ adoptLauncherFonts: () => undefined, externalFontEnvironment: (env: unknown) => env }));
 // Deletion is restricted to disposable fixture directories, never real games.
 vi.mock('./game-delete.js', () => ({ deleteGameDirectory: (target: { path: string }) => h.deleteFiles(target.path) }));
@@ -614,4 +618,13 @@ it('runs real queue IPC, pause/cancel/failure/restart and simultaneous play/down
   expect(h.downloads).toHaveLength(4);
   expect(h.notifications).toHaveLength(1); // no completion toast for cancelled/stopped jobs
   expect(h.releaseDisplay).toHaveBeenCalledWith(7);
+});
+
+it('saves overlay preferences without refreshing account or runtime access',async()=>{
+  const before=h.accountReads.length;
+  const saved=await ipc('update-settings',{overlayShortcut:'Control+Shift+G',overlaySide:'right',overlayEnabled:true});
+  expect(saved).toMatchObject({overlayShortcut:'Control+Shift+G',overlaySide:'right',overlayEnabled:true});
+  expect(h.accountReads).toHaveLength(before);
+  const persisted=new StateStore(path.join(h.root,'userData'));await persisted.load();expect(persisted.settings.overlaySide).toBe('right');
+  await expect(ipc('update-settings',{overlayShortcut:'not a shortcut'})).rejects.toThrow('shortcut');
 });

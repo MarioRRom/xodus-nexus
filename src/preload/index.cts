@@ -21,6 +21,7 @@ const nativeSocial:XboxSocialApi={
   sendXboxMessage: (account,xuid,text) => ipcRenderer.invoke('xbox-social-send',account,xuid,text),
 };
 const api: LauncherApi = {
+  setXboxOverlayRecording:recording=>ipcRenderer.invoke('xbox-overlay-recording',recording),
  getXboxDesktopProfile:()=>ipcRenderer.invoke('xbox-desktop-profile'),
  onXboxDesktopProfile:callback=>{const listener=(_event:Electron.IpcRendererEvent,request:Parameters<typeof callback>[0])=>callback(request);ipcRenderer.on('xbox-desktop-profile',listener);return()=>ipcRenderer.removeListener('xbox-desktop-profile',listener);},
   nativeSocial,
