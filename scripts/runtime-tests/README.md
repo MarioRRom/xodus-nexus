@@ -54,6 +54,8 @@ The runtime does not provide a unique platform device identifier.
   close-in-callback, expiry and nonblocking Manual Work/cancellation through the
   actual async implementation. Its test bridge always fails, with no account or
   network access. Synthetic keys and helpers are never packaged in the runtime.
+  Base-package resolution is bound to the configured Store ID and running
+  package identifier; unrelated IDs fail and related content keeps its own ID.
   Package-license tests reject absent proof, unowned/trial/wrong/expired SKUs;
   check retained result handles, actual expiry events, queued/running unregister,
   reentrant unregister/close and cancellation through the failing bridge.

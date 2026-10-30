@@ -12,8 +12,11 @@
 #define TRACE(...) printf(__VA_ARGS__)
 
 char *storeId = "B00000000001";
+static const char current_package_id[] = "abcdefa1cdefabcdefabcdefabcdefab";
+static const char related_package_id[] = "00000001111122223333444444444444";
 static HANDLE bridge_started, bridge_gate;
 static LONG bridge_active;
+static LONG bridge_requested_base_product;
 static HRESULT (WINAPI *runtime_query)(const GUID *, REFIID, void **);
 HRESULT WINAPI QueryApiImpl(const GUID *clsid, REFIID iid, void **out)
 { return runtime_query(clsid, iid, out); }
@@ -24,6 +27,8 @@ HRESULT xodus_store_license_body(const char **ids, SIZE_T count, const char *non
 HRESULT xodus_store_license_xml(const char *request, SIZE_T size, char **out)
 {
     *out = NULL;
+    if (request && strstr(request, "<ProductId>B00000000001</ProductId>"))
+        InterlockedExchange(&bridge_requested_base_product, TRUE);
     InterlockedIncrement(&bridge_active);
     SetEvent(bridge_started);
     WaitForSingleObject(bridge_gate, 1500);
@@ -34,9 +39,18 @@ HRESULT xodus_store_license_xml(const char *request, SIZE_T size, char **out)
 /* Only this account-free executable has a synthetic installed-package index. */
 HRESULT xpackage_query_content_store(const char *identifier, SIZE_T size, char *store)
 {
-    if (!identifier || strcmp(identifier, "00000001111122223333444444444444")) return E_GAMEPACKAGE_NO_PACKAGE_IDENTIFIER;
+    if (store && size) store[0] = 0;
+    if (!identifier || strcmp(identifier, related_package_id)) return E_GAMEPACKAGE_NO_PACKAGE_IDENTIFIER;
     if (size < 13) return E_NOT_SUFFICIENT_BUFFER;
-    strcpy(store, "B00000000001"); return S_OK;
+    strcpy(store, "B00000000002"); return S_OK;
+}
+HRESULT xpackage_query_identifier(const char *store, SIZE_T size, char *identifier)
+{
+    if (identifier && size) identifier[0] = 0;
+    if (!store || strcmp(store, "B00000000001")) return E_INVALIDARG;
+    if (size < sizeof(current_package_id)) return E_NOT_SUFFICIENT_BUFFER;
+    strcpy(identifier, current_package_id);
+    return S_OK;
 }
 #include "xstore_package_license.h"
 
@@ -378,10 +392,48 @@ static void test_package_licenses(void)
     XAsyncBlock block = {0};
     HANDLE trigger, waiter;
     ULONGLONG start;
+    char resolved_store[13];
+    CHECK("license-current-base-package-resolves-to-configured-store-id",
+        package_license_resolve_store(current_package_id, resolved_store) == S_OK &&
+        !strcmp(resolved_store, "B00000000001"));
+    CHECK("license-unrelated-package-does-not-use-base-store-id",
+        package_license_resolve_store("ffffffffffffffffffffffffffffffff", resolved_store) == E_GAMEPACKAGE_NO_PACKAGE_IDENTIFIER &&
+        !resolved_store[0]);
+    CHECK("license-related-content-keeps-its-own-store-id",
+        package_license_resolve_store(related_package_id, resolved_store) == S_OK &&
+        !strcmp(resolved_store, "B00000000002"));
+    {
+        char *configured_store = storeId;
+        storeId = "not-a-store-id";
+        CHECK("license-invalid-current-store-id-does-not-fallback",
+            package_license_resolve_store(current_package_id, resolved_store) == E_GAMEPACKAGE_NO_PACKAGE_IDENTIFIER &&
+            !resolved_store[0]);
+        storeId = configured_store;
+    }
     CHECK("license-threading", QueryApiImpl(&CLSID_XThreadingImpl, &IID_IXThreadingImpl, (void **)&threads) == S_OK && threads);
     if (!threads) return;
     CHECK("license-queue", IXThreadingImpl_XTaskQueueCreate(threads, XTaskQueueDispatchMode_Manual, XTaskQueueDispatchMode_Manual, &queue) == S_OK);
     CHECK("license-immediate", IXThreadingImpl_XTaskQueueCreate(threads, XTaskQueueDispatchMode_Manual, XTaskQueueDispatchMode_Immediate, &immediate) == S_OK);
+    {
+        XAsyncBlock base_block = {0};
+        XStoreLicenseHandle base_result = (void *)1;
+        ResetEvent(bridge_started); ResetEvent(bridge_gate); callbacks = 0;
+        InterlockedExchange(&bridge_requested_base_product, FALSE);
+        base_block.queue = queue; base_block.callback = complete;
+        CHECK("license-base-context", entitled_store_create(NULL, &store) == S_OK);
+        CHECK("license-base-acquire-begins", package_license_begin(store, current_package_id, &base_block) == S_OK);
+        entitled_store_close(store);
+        CHECK("license-base-work-dispatch", IXThreadingImpl_XTaskQueueDispatch(threads, queue, XTaskQueuePort_Work, 0));
+        CHECK("license-base-reaches-signed-license-bridge", WaitForSingleObject(bridge_started, 2000) == WAIT_OBJECT_0);
+        CHECK("license-base-uses-configured-store-product", InterlockedCompareExchange(&bridge_requested_base_product, FALSE, FALSE));
+        SetEvent(bridge_gate); dispatch_until_complete(threads, queue, &base_block);
+        CHECK("license-base-bridge-failure-preserved", IXThreadingImpl_XAsyncGetStatus(threads, &base_block, FALSE) == E_FAIL);
+        CHECK("license-base-completion-once", callbacks == 1);
+        CHECK("license-base-failure-no-handle",
+            FAILED(package_license_result(&base_block, &base_result)) && !base_result);
+        start = GetTickCount64(); while (bridge_active && GetTickCount64() - start < 2000) Sleep(1);
+        CHECK("license-base-worker-finishes", !bridge_active);
+    }
     product.storeId = "B00000000001"; product.productKind = XStoreProductKind_Durable;
     product.isInUserCollection = product.hasDigitalDownload = TRUE;
     product.skus = &sku; product.skusCount = 1;

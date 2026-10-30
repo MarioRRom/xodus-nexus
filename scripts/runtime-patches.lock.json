@@ -120,6 +120,10 @@
       "sha256": "e4a9c68e272719f5ad2d2baa7ffcad2542df25cb93163c1b00b081d4594ee407"
     },
     {
+      "file": "assets/xgameruntime-base-game-package-license.patch",
+      "sha256": "4d9f71776a6ccbc247f7308ba5652e2ed01d07bb1e1a8bb7a0503f39911d45cc"
+    },
+    {
       "file": "assets/xgameruntime-taskqueue-dispatch-exit.patch",
       "sha256": "e28f50f94389eae960afd4814c68fca1be70400d14e53fe16a94ee833348fd48"
     },
@@ -229,7 +233,7 @@
     "dlls/xgameruntime/xstore.c": "323183e6c7b6f627888dcd6c7d9be90bc1bf43cb8677b3be4fb06a1539947a5b",
     "dlls/xgameruntime/xstore_entitled.h": "cae87da7943d625664c94b7179b47f1eedf2cd3dfd3192f99bd1a252b273e289",
     "dlls/xgameruntime/xstore_receipts.h": "637cc315d72bb1ad20ce5529dfb6be4ef01ae8fd08a321aa5e852c1557c1d280",
-    "dlls/xgameruntime/xstore_package_license.h": "678f109e0a0af3f5e87951666f7c891af3999658f8698eb8855387ea355e2a31",
+    "dlls/xgameruntime/xstore_package_license.h": "665f5d5d99b0e976a914dbd49b863692cf65e8162780780b5a551f11d55b7a36",
     "dlls/xgameruntime/xsystem.c": "a3c151c5d05875b68f49c534aae9d40e3f15ec800af0f85e159ede7c95401880",
     "dlls/xgameruntime/xsystemanalytics.c": "189e99c83273b429325ecefa2b9246c45863c22f0c4006a791ec57b8f7b9d384",
     "dlls/xgameruntime/xthreading.c": "2cf262d75eb6da156f14f2702ccd3d59953da5bc8f4b898709c25d5489383361",

@@ -1,0 +1,37 @@
+--- a/dlls/xgameruntime/xstore_package_license.h
++++ b/dlls/xgameruntime/xstore_package_license.h
+@@ -341,6 +341,24 @@
+     return S_OK;
+ }
+ 
++/* The base game is the current Game package, not a Content package returned by
++ * XPackageEnumeratePackages. Resolve it only when its identifier matches the
++ * running package configured by MicrosoftGame.config. This selects the Store
++ * product; the subsequent license still requires fresh signed Store proof. */
++static HRESULT package_license_resolve_store( const char *identifier, char store[13] )
++{
++    HRESULT hr = xpackage_query_content_store( identifier, 13, store );
++    char current[33] = {};
++
++    if (hr != E_GAMEPACKAGE_NO_PACKAGE_IDENTIFIER) return hr;
++    if (!entitled_id(storeId) ||
++        FAILED(xpackage_query_identifier(storeId, sizeof(current), current)) ||
++        stricmp(identifier, current)) return hr;
++
++    memcpy(store, storeId, 13);
++    return S_OK;
++}
++
+ static HRESULT package_license_begin( XStoreContextHandle store, const char *identifier, XAsyncBlock *async )
+ {
+     struct package_license_async *context;
+@@ -351,7 +369,7 @@
+     if (!entitled_id(storeId)) return E_GAME_MISSING_GAME_CONFIG;
+     if (!(context = calloc(1, sizeof(*context)))) return E_OUTOFMEMORY;
+     context->refs = 1;
+-    if (FAILED(hr = xpackage_query_content_store(identifier, sizeof(context->store), context->store)))
++    if (FAILED(hr = package_license_resolve_store(identifier, context->store)))
+     { free(context); return hr; }
+     snprintf(context->request, sizeof(context->request),
+         "<Request><ParentProductId>%s</ParentProductId><ProductId>%s</ProductId>"
+         "<ProductKinds>2</ProductKinds><Market>US</Market><Language>en-US</Language></Request>", storeId, context->store);

@@ -67,9 +67,12 @@ still required before claiming that a particular game's DLC works.
 
 ### Package license handles
 
-`XStoreAcquireLicenseForPackageAsync` resolves an actually installed current/related
-content package and fetches fresh signed Store proof off the Work dispatcher.
-Only a matching licensed, downloadable, nontrial Durable SKU produces a handle.
+`XStoreAcquireLicenseForPackageAsync` resolves installed related content from
+package metadata. For the base game, it may map only the identifier reported by
+the current process back to the exact Store ID in `MicrosoftGame.config`; it
+does not treat arbitrary package IDs as the base game. Both paths fetch fresh
+signed Store proof off the Work dispatcher. Only a matching licensed,
+downloadable, nontrial Durable SKU produces a handle.
 Result retrieval, validity checks and close retain genuine proof/SKU expiration,
 separately from the short catalog-query cache lifetime. Invalid, unknown, expired
 or unlicensed products remain errors, without inferring ownership from disk.
@@ -369,8 +372,8 @@ npm run test:runtime-tools
 
 Expected contract checks: queue teardown 20, queue stress 1,302, XAsync
 provider 116, completion lifetime 2,805, scheduling 16, file saves 21,
-WinRT JSON 9, token dispatch/lifetime 88, Store entitlements/licenses 181, installed
-content 274, PlayFab folder/session 153 and initialization 19 (5,004 total),
+WinRT JSON 9, token dispatch/lifetime 88, Store entitlements/licenses 194, installed
+content 274, PlayFab folder/session 153 and initialization 19 (5,017 total),
 plus 64 game-process replacement checks, 40 software-Vulkan compute checks,
 and HTTP/1.1 and HTTP/2 transport, certificate-chain and response-decompression
 checks. The JSON probe exercises real activation, parsing,
